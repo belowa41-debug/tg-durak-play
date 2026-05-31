@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Дурак Онлайн</title>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <style>
+        body { background-color: #1a5e20; font-family: Arial, sans-serif; color: white; margin:0; overflow:hidden; user-select: none; }
+        #control-panel { position: absolute; top: 15px; left: 20px; display: flex; gap: 15px; align-items: center; z-index: 9999; }
+        #status { font-weight: bold; background: rgba(0,0,0,0.3); padding: 8px 15px; border-radius: 5px; }
+        #trump-indicator { background: rgba(0,0,0,0.6); padding: 8px 15px; border-radius: 5px; border: 2px solid gold; display: flex; align-items: center; gap: 5px; }
+        button { padding: 12px 24px; font-size: 15px; font-weight: bold; border: none; border-radius: 5px; cursor: pointer; background:#00bcd4; color:white; }
+        #invite-btn { background: #4caf50; display: none; }
+        .hand { position: absolute; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; background-color: rgba(0,0,0,0.2); padding: 15px; border-radius: 10px; bottom: 20px; min-width: 300px; justify-content: center; }
+        #enemy-hand { top: 20px; bottom: auto; }
+        #game-table { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 90%; max-width: 600px; height: 200px; border: 3px dashed rgba(255,255,255,0.2); border-radius: 15px; display: flex; justify-content: center; align-items: center; gap: 15px; }
+        .card { width: 75px; height: 110px; background: white; border-radius: 8px; color: black; padding: 5px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between; font-weight: bold; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+        .card.shirt { background: linear-gradient(135deg, #1565c0, #0d47a1); border: 2px solid white; }
+        .card.shirt * { display: none !important; }
+        .red { color: red; }
+        #overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); display: none; justify-content: center; align-items: center; z-index: 10000; flex-direction: column; }
+    </style>
+</head>
+<body>
+    <div id="control-panel">
+        <div id="status">Подключение...</div>
+        <button id="invite-btn" onclick="copyLink()">✉️ Скопировать ссылку для друга</button>
+        <div id="trump-indicator" style="display:none;">Козырь: <span id="trump-icon"></span></div>
+        <button id="action-btn" style="display:none;">Действие</button>
+    </div>
+    <div id="enemy-hand" class="hand"></div>
+    <div id="game-table"></div>
+    <div id="player-hand" class="hand"></div>
+    <div id="overlay">
+        <h1 id="overlay-text"></h1>
+        <button onclick="location.reload()">Играть снова</button>
+    </div>
+
+    <script>
+        const socket = io('https://my-durak-online.onrender.com', {
+            transports: ['websocket', 'polling'],
+            upgrade: true
+        });
+        
+        let roomId = window.location.hash.substring(1);
+        if (!roomId) {
+            roomId = Math.random().toString(36).substring(2, 7);
+            window.location.hash = roomId;
+        }
+
+        function copyLink() {
+            const fullLink = window.location.origin + window.location.pathname + '#' + roomId;
+            navigator.clipboard.writeText(fullLink).then(() => {
+                alert("Ссылка скопирована! Отправь её другу.");
+            }).catch(() => {
+                alert("Скопируй вручную: " + fullLink);
+            });
+        }
+
+        socket.emit('joinRoom', roomId);
+        
+        socket.on('status', (text) => { 
+            document.getElementById('status').innerText = text;
+            if (text.includes("Ожидаем")) {
+                document.getElementById('invite-btn').style.display = 'block';
+            } else {
+                document.getElementById('invite-btn').style.display = 'none';
+            }
+        });
+
+        socket.on('gameState', (data) => {
+            document.getElementById('invite-btn').style.display = 'none';
+            if (data.trump) {
+                const trInd = document.getElementById('trump-indicator');
+                const trIcon = document.getElementById('trump-icon');
+                trInd.style.display = 'flex';
+                trIcon.innerText = data.trump.suit.symbol;
+                trIcon.style.color = data.trump.suit.color === 'red' ? 'red' : '#66ccff';
+            }
+            document.getElementById('status').innerText = data.isMyTurn ? "Твой ход!" : "Ход соперника...";
+            const actBtn = document.getElementById('action-btn');
+            if (data.gameState === "PLAYING") {
+                actBtn.style.display = 'block';
+                actBtn.innerText = data.isMyTurn ? "Бито / Конец хода" : "Взять карты";
+                actBtn.onclick = () => socket.emit('actionButton');
+            } else { actBtn.style.display = 'none'; }
+            
+            const myHandDiv = document.getElementById('player-hand');
+            myHandDiv.innerHTML = '';
+            data.myHand.forEach((card, idx) => {
+                const cardEl = document.createElement('div');
+                cardEl.className = `card ${card.suit.color}`;
+                cardEl.innerHTML = `<div>${card.value.name} ${card.suit.symbol}</div><div style="font-size:24px; text-align:center">${card.suit.symbol}</div>`;
+                cardEl.onclick = () => { if (data.isMyTurn) socket.emit('playCard', idx); };
+                myHandDiv.appendChild(cardEl);
+            });
+            
+            const enemyHandDiv = document.getElementById('enemy-hand');
+            enemyHandDiv.innerHTML = '';
+            for(let i = 0; i < data.enemyCardCount; i++) {
+                const shirt = document.createElement('div');
+                shirt.className = 'card shirt';
+                enemyHandDiv.appendChild(shirt);
+            }
+            
+            const tableDiv = document.getElementById('game-table');
+            tableDiv.innerHTML = '';
+            data.table.forEach(card => {
+                const cardEl = document.createElement('div');
+                cardEl.className = `card ${card.suit.color}`;
+                cardEl.innerHTML = `<div>${card.value.name} ${card.suit.symbol}</div><div style="font-size:24px; text-align:center">${card.suit.symbol}</div>`;
+                tableDiv.appendChild(cardEl);
+            });
+        });
+
+        socket.on('gameOver', (data) => {
+            const overlay = document.getElementById('overlay');
+            const text = document.getElementById('overlay-text');
+            overlay.style.display = 'flex';
+            text.innerText = data.winner === socket.id ? "Вы выиграли! 🎉" : "Вы проиграли... 🥺";
+        });
+    </script>
+</body>
+</html>
