@@ -59,21 +59,18 @@ io.on('connection', (socket) => {
         if (cardIdx < 0 || cardIdx >= player.hand.length) return;
         let card = player.hand[cardIdx];
 
-        // 1. ХОД НАПАДАЮЩЕГО (Атака / Подкидывание)
+        // 1. НАПАДАЮЩИЙ
         if (playerIdx === room.attackerIdx) {
             if (room.table.length === 0) {
-                // Первый ход в коне — можно любой картой
                 player.hand.splice(cardIdx, 1);
                 room.table.push({ attack: card, defense: null });
                 updateRoom(roomId);
             } else {
-                // Подкидывание: проверяем совпадение номинала с картами на столе
                 let allowedNames = [];
                 room.table.forEach(pair => {
                     allowedNames.push(pair.attack.value.name);
                     if (pair.defense) allowedNames.push(pair.defense.value.name);
                 });
-                
                 if (allowedNames.includes(card.value.name)) {
                     player.hand.splice(cardIdx, 1);
                     room.table.push({ attack: card, defense: null });
@@ -81,11 +78,10 @@ io.on('connection', (socket) => {
                 }
             }
         } 
-        // 2. ХОД ЗАЩИЩАЮЩЕГОСЯ (Отбой)
+        // 2. ЗАЩИЩАЮЩИЙСЯ
         else if (playerIdx === defenderIdx) {
-            // Ищем первую карту, которую нужно побить
             let pairToBeat = room.table.find(pair => pair.defense === null);
-            if (!pairToBeat) return; // Всё уже побито, ждем подкидывания
+            if (!pairToBeat) return;
 
             if (canBeat(pairToBeat.attack, card, room.trump.suit.id)) {
                 player.hand.splice(cardIdx, 1);
@@ -105,7 +101,7 @@ io.on('connection', (socket) => {
         let playerIdx = room.players.findIndex(p => p.id === socket.id);
         let defenderIdx = room.attackerIdx === 0 ? 1 : 0;
 
-        // Нападающий нажимает "БИТО"
+        // Нападающий жмет БИТО
         if (playerIdx === room.attackerIdx && room.table.length > 0) {
             let allBeaten = room.table.every(pair => pair.defense !== null);
             if (allBeaten) {
@@ -116,7 +112,7 @@ io.on('connection', (socket) => {
                 updateRoom(roomId);
             }
         } 
-        // Защитник нажимает "ВЗЯТЬ КАРТЫ"
+        // Защитник жмет ВЗЯТЬ
         else if (playerIdx === defenderIdx && room.table.length > 0) {
             let defender = room.players[defenderIdx];
             room.table.forEach(pair => {
@@ -124,8 +120,7 @@ io.on('connection', (socket) => {
                 if (pair.defense) defender.hand.push(pair.defense);
             });
             room.table = [];
-            drawCards(room); // Нападающий добирает, защитник — нет, т.к. взял карты
-            // Ход переходит к следующему игроку (в дуэли это значит, что нападающий снова ходит)
+            drawCards(room);
             checkWin(roomId);
             updateRoom(roomId);
         }
@@ -140,43 +135,33 @@ io.on('connection', (socket) => {
     });
 });
 
-// Функция проверки: бьет ли карта защиты карту атаки
 function canBeat(attack, defense, trumpSuitId) {
-    // 1. Если масти совпадают, карта защиты должна быть сильнее
     if (attack.suit.id === defense.suit.id) {
         return defense.value.strength > attack.value.strength;
     }
-    // 2. Если атаковали НЕ козырем, а защищаются КОЗЫРЕМ — бить можно всегда
     if (attack.suit.id !== trumpSuitId && defense.suit.id === trumpSuitId) {
         return true;
     }
-    // Во всех остальных случаях ход невозможен
     return false;
 }
+
 function initGame(room) {
     room.state = "PLAYING";
     room.deck = [];
-    // Создаем колоду 36 карт
     for (let suit of SUITS) {
         for (let val of VALUES) {
             room.deck.push({ suit, value: val });
         }
     }
-    // Тасуем колоду
     room.deck.sort(() => Math.random() - 0.5);
     
-    // Раздаем по 6 карт
     for (let player of room.players) {
         player.hand = room.deck.splice(0, 6);
     }
-    
-    // Козырь — нижняя карта
     room.trump = room.deck[room.deck.length - 1];
 
-    // Определяем, у кого младший козырь для первого хода
     let lowestTrumpIdx = 0;
     let lowestTrumpStrength = 99;
-
     room.players.forEach((player, pIdx) => {
         player.hand.forEach(card => {
             if (card.suit.id === room.trump.suit.id && card.value.strength < lowestTrumpStrength) {
@@ -185,11 +170,9 @@ function initGame(room) {
             }
         });
     });
-    
     room.attackerIdx = lowestTrumpIdx;
 }
 
-// Добор карт до 6 штук
 function drawCards(room) {
     for (let i = 0; i < 2; i++) {
         let p = room.players[(room.attackerIdx + i) % 2];
