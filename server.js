@@ -27,9 +27,9 @@ const SUITS = [
     { id: 'diamonds', symbol: '♦', color: 'red' }
 ];
 const VALUES = [
-    { name: '6', strength: 6 }, { name: '7', strength: 7 }, { name: '8', strength: 8 },
-    { name: '9', strength: 9 }, { name: '10', strength: 10 }, { name: 'J', strength: 11 },
-    { name: 'Q', strength: 12 }, { name: 'K', strength: 13 }, { name: 'A', strength: 14 }
+    { name: '6' }, { name: '7' }, { name: '8' },
+    { name: '9' }, { name: '10' }, { name: 'J' },
+    { name: 'Q' }, { name: 'K' }, { name: 'A' }
 ];
 
 let rooms = {};
@@ -37,18 +37,23 @@ let rooms = {};
 io.on('connection', (socket) => {
     socket.on('joinRoom', (roomId) => {
         socket.join(roomId);
+        
         if (!rooms[roomId]) {
-            rooms[roomId] = { players: [], deck: [], trump: null, table: [], turn: 0, state: "WAITING" };
+            rooms[roomId] = { players: [], deck: [], trump: null, table: [], state: "WAITING" };
         }
+        
         let room = rooms[roomId];
+        
         if (room.players.length < 2 && !room.players.some(p => p.id === socket.id)) {
             room.players.push({ id: socket.id, hand: [], name: `Игрок ${room.players.length + 1}` });
         }
+        
         if (room.players.length === 2 && room.state === "WAITING") {
             initGame(room);
-        } else {
+        } else if (room.state === "WAITING") {
             socket.emit('status', "Ожидаем второго игрока...");
         }
+        
         updateRoom(roomId);
     });
 
@@ -56,13 +61,14 @@ io.on('connection', (socket) => {
         let roomId = getPlayerRoom(socket.id);
         if (!roomId) return;
         let room = rooms[roomId];
-        let playerIdx = room.players.findIndex(p => p.id === socket.id);
-        if (playerIdx !== room.turn || room.state !== "PLAYING") return;
-        let player = room.players[playerIdx];
+        if (room.state !== "PLAYING") return;
+        
+        let player = room.players.find(p => p.id === socket.id);
+        if (!player) return;
+
         if (cardIdx >= 0 && cardIdx < player.hand.length) {
             let card = player.hand.splice(cardIdx, 1)[0];
             room.table.push(card);
-            room.turn = (room.turn + 1) % 2;
             checkWin(roomId);
             updateRoom(roomId);
         }
@@ -73,8 +79,9 @@ io.on('connection', (socket) => {
         if (!roomId) return;
         let room = rooms[roomId];
         if (room.state !== "PLAYING") return;
+        
+        // Кнопка просто очищает стол для следующего раунда
         room.table = [];
-        room.turn = (room.turn + 1) % 2;
         updateRoom(roomId);
     });
 
@@ -97,33 +104,29 @@ function initGame(room) {
     }
     room.deck.sort(() => Math.random() - 0.5);
     room.trump = room.deck[room.deck.length - 1];
+    
     for (let player of room.players) {
         player.hand = room.deck.splice(0, 6);
     }
-    room.turn = 0;
 }
 
 function checkWin(roomId) {
     let room = rooms[roomId];
-    if (room.deck.length === 0) {
-        let p1 = room.players[0];
-        let p2 = room.players[1];
-        if (p1.hand.length === 0 && p2.hand.length === 0) {
-            room.state = "ENDED";
-            io.to(roomId).emit('gameOver', { winner: 'draw' });
-        } else if (p1.hand.length === 0) {
-            room.state = "ENDED";
-            io.to(roomId).emit('gameOver', { winner: p1.id });
-        } else if (p2.hand.length === 0) {
-            room.state = "ENDED";
-            io.to(roomId).emit('gameOver', { winner: p2.id });
-        }
+    let p1 = room.players[0];
+    let p2 = room.players[1];
+    if (p1.hand.length === 0) {
+        room.state = "ENDED";
+        io.to(roomId).emit('gameOver', { winner: p1.id });
+    } else if (p2.hand.length === 0) {
+        room.state = "ENDED";
+        io.to(roomId).emit('gameOver', { winner: p2.id });
     }
 }
 
 function updateRoom(roomId) {
     let room = rooms[roomId];
     if (!room || room.state !== "PLAYING") return;
+    
     room.players.forEach((player, idx) => {
         let enemy = room.players[(idx + 1) % 2];
         io.to(player.id).emit('gameState', {
@@ -131,7 +134,6 @@ function updateRoom(roomId) {
             enemyCardCount: enemy ? enemy.hand.length : 0,
             table: room.table,
             trump: room.trump,
-            isMyTurn: room.turn === idx,
             gameState: room.state
         });
     });
