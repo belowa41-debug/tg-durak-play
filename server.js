@@ -142,15 +142,17 @@ io.on('connection', (socket) => {
 
 // Функция проверки: бьет ли карта защиты карту атаки
 function canBeat(attack, defense, trumpSuitId) {
+    // 1. Если масти совпадают, карта защиты должна быть сильнее
     if (attack.suit.id === defense.suit.id) {
         return defense.value.strength > attack.value.strength;
     }
+    // 2. Если атаковали НЕ козырем, а защищаются КОЗЫРЕМ — бить можно всегда
     if (attack.suit.id !== trumpSuitId && defense.suit.id === trumpSuitId) {
         return true;
     }
+    // Во всех остальных случаях ход невозможен
     return false;
 }
-
 function initGame(room) {
     room.state = "PLAYING";
     room.deck = [];
