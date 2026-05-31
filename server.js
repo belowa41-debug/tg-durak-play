@@ -57,27 +57,28 @@ io.on('connection', (socket) => {
         let player = room.players[playerIdx];
         
         if (cardIdx < 0 || cardIdx >= player.hand.length) return;
-        
-        // Проверка: чей сейчас ход для таймера
-        let expectedPlayerIdx = (room.table.length === 0 || room.table[room.table.length - 1].defense !== null) ? room.attackerIdx : defenderIdx;
-        if (playerIdx !== expectedPlayerIdx) return;
-
         let card = player.hand[cardIdx];
 
-        // 1. НАПАДАЮЩИЙ
+        // 1. ЛОГИКА НАПАДАЮЩЕГО (Атака и Подкидывание)
         if (playerIdx === room.attackerIdx) {
+            // Первый ход в раунде — можно ходить любой картой
             if (room.table.length === 0) {
                 player.hand.splice(cardIdx, 1);
                 room.table.push({ attack: card, defense: null });
                 resetRoomTimer(room, roomId);
                 updateRoom(roomId);
-            } else {
-                let allowedNames = [];
+            } 
+            // Подкидывание — на столе уже что-то есть
+            else {
+                // Собираем ВСЕ номиналы карт, которые уже есть на столе (и в атаке, и в защите)
+                let valuesOnTable = [];
                 room.table.forEach(pair => {
-                    allowedNames.push(pair.attack.value.name);
-                    if (pair.defense) allowedNames.push(pair.defense.value.name);
+                    valuesOnTable.push(pair.attack.value.name);
+                    if (pair.defense) valuesOnTable.push(pair.defense.value.name);
                 });
-                if (allowedNames.includes(card.value.name)) {
+
+                // Если номинал карты из руки совпадает с любой картой на столе — подкидываем!
+                if (valuesOnTable.includes(card.value.name)) {
                     player.hand.splice(cardIdx, 1);
                     room.table.push({ attack: card, defense: null });
                     resetRoomTimer(room, roomId);
@@ -85,8 +86,9 @@ io.on('connection', (socket) => {
                 }
             }
         } 
-        // 2. ЗАЩИЩАЮЩИЙСЯ
+        // 2. ЛОГИКА ЗАЩИЩАЮЩЕГОСЯ
         else if (playerIdx === defenderIdx) {
+            // Ищем первую непобитую карту на столе
             let pairToBeat = room.table.find(pair => pair.defense === null);
             if (!pairToBeat) return;
 
@@ -109,19 +111,19 @@ io.on('connection', (socket) => {
         let playerIdx = room.players.findIndex(p => p.id === socket.id);
         let defenderIdx = room.attackerIdx === 0 ? 1 : 0;
 
-        // Кнопка БИТО (для нападающего)
+        // Нападающий жмет БИТО
         if (playerIdx === room.attackerIdx && room.table.length > 0) {
             let allBeaten = room.table.every(pair => pair.defense !== null);
             if (allBeaten) {
                 room.table = [];
                 drawCards(room);
-                room.attackerIdx = defenderIdx;
+                room.attackerIdx = defenderIdx; // Ход переходит к защитнику
                 resetRoomTimer(room, roomId);
                 checkWin(roomId);
                 updateRoom(roomId);
             }
         } 
-        // Кнопка ВЗЯТЬ КАРТЫ (для защитника)
+        // Защитник жмет ВЗЯТЬ
         else if (playerIdx === defenderIdx && room.table.length > 0) {
             let defender = room.players[defenderIdx];
             room.table.forEach(pair => {
@@ -130,6 +132,7 @@ io.on('connection', (socket) => {
             });
             room.table = [];
             drawCards(room);
+            // Так как защитник взял карты, право атаки ОСТАЕТСЯ у прежнего нападающего
             resetRoomTimer(room, roomId);
             checkWin(roomId);
             updateRoom(roomId);
@@ -191,7 +194,6 @@ function resetRoomTimer(room, roomId) {
     
     room.timeLeft = 60;
     let defenderIdx = room.attackerIdx === 0 ? 1 : 0;
-    // Определяем, кто сейчас активно думает
     let activeIdx = (room.table.length === 0 || room.table[room.table.length - 1].defense !== null) ? room.attackerIdx : defenderIdx;
     room.activeTurnPlayerId = room.players[activeIdx].id;
 
@@ -200,7 +202,6 @@ function resetRoomTimer(room, roomId) {
         if (room.timeLeft <= 0) {
             clearInterval(room.timer);
             room.state = "ENDED";
-            // Тот, у кого вышло время, проигрывает (побеждает другой)
             let winner = room.players.find(p => p.id !== room.activeTurnPlayerId);
             io.to(roomId).emit('gameOver', { winner: winner ? winner.id : 'draw', reason: 'timeout' });
         } else {
@@ -264,31 +265,3 @@ function getPlayerRoom(socketId) {
 
 const PORT = process.env.PORT || 10000;
 server.listen(PORT, '0.0.0.0', () => console.log(`Сервер запущен на порту ${PORT}`));
-// --- БЛОК TELEGRAM БОТА ---
-const TelegramBot = require('node-telegram-bot-api');
-
-// ЗАМЕНИ ЦИТАТУ НИЖЕ НА СВОЙ ТОКЕН ОТ BOTFATHER!
-const TOKEN = '8984371530:AAEJxqV_EkgUfzj75PUVWP44ACwUGqtwoIs'; 
-
-const bot = new TelegramBot(TOKEN, { polling: true });
-
-// URL твоей игры на Render
-const GAME_URL = 'https://tg-durak-play.onrender.com';
-
-bot.onText(/\/start/, (msg) => {
-    const chatId = msg.chat.id;
-    
-    bot.sendMessage(chatId, `Привет, ${msg.from.first_name}! 🎉\nДобро пожаловать в игру «Дурак Онлайн»!\n\nНажми на кнопку ниже, чтобы запустить игру. Чтобы сыграть с другом, отправь ему ссылку, которую скопируешь внутри игры!`, {
-        reply_markup: {
-            inline_keyboard: [
-                [
-                    {
-                        text: '🃏 Играть в Дурака',
-                        web_app: { url: GAME_URL }
-                    }
-                ]
-            ]
-        }
-    });
-});
-console.log('Telegram бот успешно запущен!');
