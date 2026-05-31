@@ -32,14 +32,14 @@ io.on('connection', (socket) => {
     socket.on('joinRoom', (roomId) => {
         socket.join(roomId);
         if (!rooms[roomId]) {
-            rooms[roomId] = { players: [], deck: [], trump: null, table: [], attackerIdx: 0, state: "WAITING" };
+            rooms[roomId] = { players: [], deck: [], trump: null, table: [], attackerIdx: 0, state: "WAITING", timer: null, timeLeft: 60, activeTurnPlayerId: null };
         }
         let room = rooms[roomId];
         if (room.players.length < 2 && !room.players.some(p => p.id === socket.id)) {
             room.players.push({ id: socket.id, hand: [], name: `Игрок ${room.players.length + 1}` });
         }
         if (room.players.length === 2 && room.state === "WAITING") {
-            initGame(room);
+            initGame(room, roomId);
         } else if (room.state === "WAITING") {
             socket.emit('status', "Ожидаем второго игрока...");
         }
@@ -57,6 +57,11 @@ io.on('connection', (socket) => {
         let player = room.players[playerIdx];
         
         if (cardIdx < 0 || cardIdx >= player.hand.length) return;
+        
+        // Проверка: чей сейчас ход для таймера
+        let expectedPlayerIdx = (room.table.length === 0 || room.table[room.table.length - 1].defense !== null) ? room.attackerIdx : defenderIdx;
+        if (playerIdx !== expectedPlayerIdx) return;
+
         let card = player.hand[cardIdx];
 
         // 1. НАПАДАЮЩИЙ
@@ -64,6 +69,7 @@ io.on('connection', (socket) => {
             if (room.table.length === 0) {
                 player.hand.splice(cardIdx, 1);
                 room.table.push({ attack: card, defense: null });
+                resetRoomTimer(room, roomId);
                 updateRoom(roomId);
             } else {
                 let allowedNames = [];
@@ -74,6 +80,7 @@ io.on('connection', (socket) => {
                 if (allowedNames.includes(card.value.name)) {
                     player.hand.splice(cardIdx, 1);
                     room.table.push({ attack: card, defense: null });
+                    resetRoomTimer(room, roomId);
                     updateRoom(roomId);
                 }
             }
@@ -86,6 +93,7 @@ io.on('connection', (socket) => {
             if (canBeat(pairToBeat.attack, card, room.trump.suit.id)) {
                 player.hand.splice(cardIdx, 1);
                 pairToBeat.defense = card;
+                resetRoomTimer(room, roomId);
                 checkWin(roomId);
                 updateRoom(roomId);
             }
@@ -101,18 +109,19 @@ io.on('connection', (socket) => {
         let playerIdx = room.players.findIndex(p => p.id === socket.id);
         let defenderIdx = room.attackerIdx === 0 ? 1 : 0;
 
-        // Нападающий жмет БИТО
+        // Кнопка БИТО (для нападающего)
         if (playerIdx === room.attackerIdx && room.table.length > 0) {
             let allBeaten = room.table.every(pair => pair.defense !== null);
             if (allBeaten) {
                 room.table = [];
                 drawCards(room);
-                room.attackerIdx = defenderIdx; // Ход переходит к защитнику
+                room.attackerIdx = defenderIdx;
+                resetRoomTimer(room, roomId);
                 checkWin(roomId);
                 updateRoom(roomId);
             }
         } 
-        // Защитник жмет ВЗЯТЬ
+        // Кнопка ВЗЯТЬ КАРТЫ (для защитника)
         else if (playerIdx === defenderIdx && room.table.length > 0) {
             let defender = room.players[defenderIdx];
             room.table.forEach(pair => {
@@ -121,6 +130,7 @@ io.on('connection', (socket) => {
             });
             room.table = [];
             drawCards(room);
+            resetRoomTimer(room, roomId);
             checkWin(roomId);
             updateRoom(roomId);
         }
@@ -129,6 +139,7 @@ io.on('connection', (socket) => {
     socket.on('disconnect', () => {
         let roomId = getPlayerRoom(socket.id);
         if (roomId && rooms[roomId]) {
+            clearInterval(rooms[roomId].timer);
             io.to(roomId).emit('status', "Соперник отключился.");
             delete rooms[roomId];
         }
@@ -145,7 +156,7 @@ function canBeat(attack, defense, trumpSuitId) {
     return false;
 }
 
-function initGame(room) {
+function initGame(room, roomId) {
     room.state = "PLAYING";
     room.deck = [];
     for (let suit of SUITS) {
@@ -171,6 +182,31 @@ function initGame(room) {
         });
     });
     room.attackerIdx = lowestTrumpIdx;
+    
+    resetRoomTimer(room, roomId);
+}
+
+function resetRoomTimer(room, roomId) {
+    if (room.timer) clearInterval(room.timer);
+    
+    room.timeLeft = 60;
+    let defenderIdx = room.attackerIdx === 0 ? 1 : 0;
+    // Определяем, кто сейчас активно думает
+    let activeIdx = (room.table.length === 0 || room.table[room.table.length - 1].defense !== null) ? room.attackerIdx : defenderIdx;
+    room.activeTurnPlayerId = room.players[activeIdx].id;
+
+    room.timer = setInterval(() => {
+        room.timeLeft--;
+        if (room.timeLeft <= 0) {
+            clearInterval(room.timer);
+            room.state = "ENDED";
+            // Тот, у кого вышло время, проигрывает (побеждает другой)
+            let winner = room.players.find(p => p.id !== room.activeTurnPlayerId);
+            io.to(roomId).emit('gameOver', { winner: winner ? winner.id : 'draw', reason: 'timeout' });
+        } else {
+            io.to(roomId).emit('timerUpdate', { timeLeft: room.timeLeft, activeId: room.activeTurnPlayerId });
+        }
+    }, 1000);
 }
 
 function drawCards(room) {
@@ -188,11 +224,11 @@ function checkWin(roomId) {
         let p1 = room.players[0];
         let p2 = room.players[1];
         if (p1.hand.length === 0 && p2.hand.length === 0) {
-            room.state = "ENDED"; io.to(roomId).emit('gameOver', { winner: 'draw' });
+            clearInterval(room.timer); room.state = "ENDED"; io.to(roomId).emit('gameOver', { winner: 'draw' });
         } else if (p1.hand.length === 0) {
-            room.state = "ENDED"; io.to(roomId).emit('gameOver', { winner: p1.id });
+            clearInterval(room.timer); room.state = "ENDED"; io.to(roomId).emit('gameOver', { winner: p1.id });
         } else if (p2.hand.length === 0) {
-            room.state = "ENDED"; io.to(roomId).emit('gameOver', { winner: p2.id });
+            clearInterval(room.timer); room.state = "ENDED"; io.to(roomId).emit('gameOver', { winner: p2.id });
         }
     }
 }
@@ -203,14 +239,16 @@ function updateRoom(roomId) {
     
     room.players.forEach((player, idx) => {
         let enemy = room.players[(idx + 1) % 2];
-        let isAttacker = (idx === room.attackerIdx);
+        let defenderIdx = room.attackerIdx === 0 ? 1 : 0;
+        let activeIdx = (room.table.length === 0 || room.table[room.table.length - 1].defense !== null) ? room.attackerIdx : defenderIdx;
         
         io.to(player.id).emit('gameState', {
             myHand: player.hand,
             enemyCardCount: enemy ? enemy.hand.length : 0,
             table: room.table,
             trump: room.trump,
-            isAttacker: isAttacker,
+            isAttacker: (idx === room.attackerIdx),
+            isMyActiveTurn: (idx === activeIdx),
             deckCount: room.deck.length,
             gameState: room.state
         });
