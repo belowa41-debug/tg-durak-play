@@ -268,7 +268,7 @@ server.listen(PORT, '0.0.0.0', () => console.log(`Сервер запущен н
 const TelegramBot = require('node-telegram-bot-api');
 
 // ЗАМЕНИ ЦИТАТУ НИЖЕ НА СВОЙ ТОКЕН ОТ BOTFATHER!
-const TOKEN =8984371530:AAEJxqV_EkgUfzj75PUVWP44ACwUGqtwoIs; 
+const TOKEN = '8984371530:AAEJxqV_EkgUfzj75PUVWP44ACwUGqtwoIs'; 
 
 const bot = new TelegramBot(TOKEN, { polling: true });
 
