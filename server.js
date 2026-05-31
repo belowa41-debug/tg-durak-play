@@ -264,3 +264,31 @@ function getPlayerRoom(socketId) {
 
 const PORT = process.env.PORT || 10000;
 server.listen(PORT, '0.0.0.0', () => console.log(`Сервер запущен на порту ${PORT}`));
+// --- БЛОК TELEGRAM БОТА ---
+const TelegramBot = require('node-telegram-bot-api');
+
+// ЗАМЕНИ ЦИТАТУ НИЖЕ НА СВОЙ ТОКЕН ОТ BOTFATHER!
+const TOKEN =8984371530:AAEJxqV_EkgUfzj75PUVWP44ACwUGqtwoIs; 
+
+const bot = new TelegramBot(TOKEN, { polling: true });
+
+// URL твоей игры на Render
+const GAME_URL = 'https://tg-durak-play.onrender.com';
+
+bot.onText(/\/start/, (msg) => {
+    const chatId = msg.chat.id;
+    
+    bot.sendMessage(chatId, `Привет, ${msg.from.first_name}! 🎉\nДобро пожаловать в игру «Дурак Онлайн»!\n\nНажми на кнопку ниже, чтобы запустить игру. Чтобы сыграть с другом, отправь ему ссылку, которую скопируешь внутри игры!`, {
+        reply_markup: {
+            inline_keyboard: [
+                [
+                    {
+                        text: '🃏 Играть в Дурака',
+                        web_app: { url: GAME_URL }
+                    }
+                ]
+            ]
+        }
+    });
+});
+console.log('Telegram бот успешно запущен!');
