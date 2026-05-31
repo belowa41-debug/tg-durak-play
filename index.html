@@ -8,81 +8,99 @@
     <style>
         body { background-color: #1a5e20; font-family: Arial, sans-serif; color: white; margin:0; overflow:hidden; user-select: none; }
         #control-panel { position: absolute; top: 15px; left: 20px; display: flex; gap: 15px; align-items: center; z-index: 9999; }
-        #status { font-weight: bold; background: rgba(0,0,0,0.3); padding: 8px 15px; border-radius: 5px; }
+        #status { font-weight: bold; background: rgba(0,0,0,0.5); padding: 8px 15px; border-radius: 5px; border-left: 5px solid #00bcd4; }
         #trump-indicator { background: rgba(0,0,0,0.6); padding: 8px 15px; border-radius: 5px; border: 2px solid gold; display: flex; align-items: center; gap: 5px; }
         button { padding: 12px 24px; font-size: 15px; font-weight: bold; border: none; border-radius: 5px; cursor: pointer; background:#00bcd4; color:white; }
         #invite-btn { background: #4caf50; display: none; }
         .hand { position: absolute; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; background-color: rgba(0,0,0,0.2); padding: 15px; border-radius: 10px; bottom: 20px; min-width: 300px; justify-content: center; }
         #enemy-hand { top: 20px; bottom: auto; }
-        #game-table { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 90%; max-width: 600px; height: 200px; border: 3px dashed rgba(255,255,255,0.2); border-radius: 15px; display: flex; justify-content: center; align-items: center; gap: 15px; flex-wrap: wrap; overflow: hidden; }
-        .card { width: 75px; height: 110px; background: white; border-radius: 8px; color: black; padding: 5px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between; font-weight: bold; box-shadow: 0 4px 6px rgba(0,0,0,0.3); cursor: pointer; }
+        #game-table { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 95%; max-width: 750px; height: 170px; border: 2px dashed rgba(255,255,255,0.2); border-radius: 15px; display: flex; justify-content: center; align-items: center; gap: 20px; }
+        .card-pair { position: relative; width: 75px; height: 130px; }
+        .card { width: 75px; height: 110px; background: white; border-radius: 8px; color: black; padding: 5px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between; font-weight: bold; box-shadow: 0 4px 6px rgba(0,0,0,0.3); cursor: pointer; transition: transform 0.1s ease; }
+        .card:hover { transform: translateY(-5px); }
+        .card.defense-card { position: absolute; top: 22px; left: 12px; box-shadow: -4px 4px 6px rgba(0,0,0,0.5); }
         .card.shirt { background: linear-gradient(135deg, #1565c0, #0d47a1); border: 2px solid white; cursor: default; }
+        .card.shirt:hover { transform: none; }
         .card.shirt * { display: none !important; }
-        .black { color: black; }
         .red { color: red; }
+        .black { color: black; }
         #overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); display: none; justify-content: center; align-items: center; z-index: 10000; flex-direction: column; }
     </style>
 </head>
 <body>
     <div id="control-panel">
-        <div id="status">Подключение к серверу...</div>
-        <button id="invite-btn" onclick="copyLink()">✉️ Скопировать ссылку для друга</button>
-        <div id="trump-indicator" style="display:none;">Козырь: <span id="trump-icon"></span></div>
-        <button id="action-btn" style="background:#ff9800; display:none;" onclick="socket.emit('actionButton')">Бито / Взять карты</button>
+        <div id="status">Подключение к игре...</div>
+        <button id="invite-btn" onclick="copyLink()">✉️ Позвать друга</button>
+        <div id="trump-indicator" style="display:none;">Козырь: <span id="trump-icon"></span> (<span id="deck-count">0</span>)</div>
+        <button id="action-btn" style="display:none;"></button>
     </div>
+    
     <div id="enemy-hand" class="hand"></div>
     <div id="game-table"></div>
     <div id="player-hand" class="hand"></div>
+    
     <div id="overlay">
         <h1 id="overlay-text"></h1>
         <button onclick="location.reload()">Играть снова</button>
     </div>
 
     <script>
-        // Автоматическое умное подключение
         const socket = io({ transports: ['websocket', 'polling'] });
-        
         let roomId = window.location.hash.substring(1);
-        if (!roomId) {
-            roomId = Math.random().toString(36).substring(2, 7);
-            window.location.hash = roomId;
-        }
+        if (!roomId) { roomId = Math.random().toString(36).substring(2, 7); window.location.hash = roomId; }
 
         function copyLink() {
             const fullLink = window.location.origin + window.location.pathname + '#' + roomId;
-            navigator.clipboard.writeText(fullLink).then(() => {
-                alert("Ссылка скопирована! Отправь её другу.");
-            }).catch(() => {
-                alert("Скопируй адресную строку вручную: " + fullLink);
-            });
+            navigator.clipboard.writeText(fullLink).then(() => alert("Ссылка скопирована! Отправь её другу в чат."));
         }
 
         socket.emit('joinRoom', roomId);
         
         socket.on('status', (text) => { 
             document.getElementById('status').innerText = text;
-            if (text.includes("Ожидаем")) {
-                document.getElementById('invite-btn').style.display = 'block';
-            } else {
-                document.getElementById('invite-btn').style.display = 'none';
-            }
+            document.getElementById('invite-btn').style.display = text.includes("Ожидаем") ? 'block' : 'none';
         });
 
         socket.on('gameState', (data) => {
             document.getElementById('invite-btn').style.display = 'none';
-            document.getElementById('status').innerText = "Игра идет! Кликай по картам, чтобы ходить.";
             
-            if (data.trump) {
-                const trInd = document.getElementById('trump-indicator');
-                const trIcon = document.getElementById('trump-icon');
-                trInd.style.display = 'flex';
-                trIcon.innerText = data.trump.suit.symbol;
-                trIcon.style.color = data.trump.suit.color === 'red' ? 'red' : 'black';
+            // Вывод роли на экран
+            const statusEl = document.getElementById('status');
+            if (data.isAttacker) {
+                statusEl.innerText = "АТАКА: Твой ход! Выбери карту.";
+                statusEl.style.borderLeftColor = "#4caf50";
+            } else {
+                statusEl.innerText = "ЗАЩИТА: Твой ход! Побей карту на столе.";
+                statusEl.style.borderLeftColor = "#ff5722";
             }
             
-            document.getElementById('action-btn').style.display = 'block';
+            // Счетчик колоды и козырь
+            if (data.trump) {
+                document.getElementById('trump-indicator').style.display = 'flex';
+                document.getElementById('trump-icon').innerText = data.trump.suit.symbol;
+                document.getElementById('trump-icon').style.color = data.trump.suit.color === 'red' ? 'red' : 'black';
+                document.getElementById('deck-count').innerText = data.deckCount;
+            }
             
-            // Твоя рука
+            // Настройка кнопок по правилам
+            const actBtn = document.getElementById('action-btn');
+            if (data.table.length > 0) {
+                actBtn.style.display = 'block';
+                if (data.isAttacker) {
+                    const allBeaten = data.table.every(p => p.defense !== null);
+                    actBtn.innerText = "Бито";
+                    actBtn.style.background = allBeaten ? "#4caf50" : "#777777";
+                    actBtn.disabled = !allBeaten; // Нельзя нажать Бито, пока защитник не отбился
+                } else {
+                    actBtn.innerText = "Взять карты";
+                    actBtn.style.background = "#e65100";
+                    actBtn.disabled = false;
+                }
+            } else {
+                actBtn.style.display = 'none';
+            }
+            
+            // Отрисовка твоих карт
             const myHandDiv = document.getElementById('player-hand');
             myHandDiv.innerHTML = '';
             data.myHand.forEach((card, idx) => {
@@ -93,7 +111,7 @@
                 myHandDiv.appendChild(cardEl);
             });
             
-            // Рука соперника
+            // Рубашки карт соперника
             const enemyHandDiv = document.getElementById('enemy-hand');
             enemyHandDiv.innerHTML = '';
             for(let i = 0; i < data.enemyCardCount; i++) {
@@ -102,14 +120,25 @@
                 enemyHandDiv.appendChild(shirt);
             }
             
-            // Игровой стол
+            // Игровой стол парных карт
             const tableDiv = document.getElementById('game-table');
             tableDiv.innerHTML = '';
-            data.table.forEach(card => {
-                const cardEl = document.createElement('div');
-                cardEl.className = `card ${card.suit.color}`;
-                cardEl.innerHTML = `<div>${card.value.name} ${card.suit.symbol}</div><div style="font-size:24px; text-align:center">${card.suit.symbol}</div>`;
-                tableDiv.appendChild(cardEl);
+            data.table.forEach(pair => {
+                const pairDiv = document.createElement('div');
+                pairDiv.className = 'card-pair';
+                
+                const attCard = document.createElement('div');
+                attCard.className = `card ${pair.attack.suit.color}`;
+                attCard.innerHTML = `<div>${pair.attack.value.name} ${pair.attack.suit.symbol}</div><div style="font-size:24px; text-align:center">${pair.attack.suit.symbol}</div>`;
+                pairDiv.appendChild(attCard);
+                
+                if (pair.defense) {
+                    const defCard = document.createElement('div');
+                    defCard.className = `card defense-card ${pair.defense.suit.color}`;
+                    defCard.innerHTML = `<div>${pair.defense.value.name} ${pair.defense.suit.symbol}</div><div style="font-size:24px; text-align:center">${pair.defense.suit.symbol}</div>`;
+                    pairDiv.appendChild(defCard);
+                }
+                tableDiv.appendChild(pairDiv);
             });
         });
 
@@ -117,7 +146,11 @@
             const overlay = document.getElementById('overlay');
             const text = document.getElementById('overlay-text');
             overlay.style.display = 'flex';
-            text.innerText = data.winner === socket.id ? "Вы выиграли! 🎉" : "Вы проиграли... 🥺";
+            if (data.winner === 'draw') {
+                text.innerText = "Ничья! 🤝";
+            } else {
+                text.innerText = data.winner === socket.id ? "Вы выиграли! 🎉" : "Вы проиграли... Дурак! 🥺";
+            }
         });
     </script>
 </body>
