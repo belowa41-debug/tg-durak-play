@@ -14,20 +14,21 @@
         #invite-btn { background: #4caf50; display: none; }
         .hand { position: absolute; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; background-color: rgba(0,0,0,0.2); padding: 15px; border-radius: 10px; bottom: 20px; min-width: 300px; justify-content: center; }
         #enemy-hand { top: 20px; bottom: auto; }
-        #game-table { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 90%; max-width: 600px; height: 200px; border: 3px dashed rgba(255,255,255,0.2); border-radius: 15px; display: flex; justify-content: center; align-items: center; gap: 15px; }
-        .card { width: 75px; height: 110px; background: white; border-radius: 8px; color: black; padding: 5px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between; font-weight: bold; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
-        .card.shirt { background: linear-gradient(135deg, #1565c0, #0d47a1); border: 2px solid white; }
+        #game-table { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 90%; max-width: 600px; height: 200px; border: 3px dashed rgba(255,255,255,0.2); border-radius: 15px; display: flex; justify-content: center; align-items: center; gap: 15px; flex-wrap: wrap; overflow: hidden; }
+        .card { width: 75px; height: 110px; background: white; border-radius: 8px; color: black; padding: 5px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between; font-weight: bold; box-shadow: 0 4px 6px rgba(0,0,0,0.3); cursor: pointer; }
+        .card.shirt { background: linear-gradient(135deg, #1565c0, #0d47a1); border: 2px solid white; cursor: default; }
         .card.shirt * { display: none !important; }
+        .black { color: black; }
         .red { color: red; }
         #overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); display: none; justify-content: center; align-items: center; z-index: 10000; flex-direction: column; }
     </style>
 </head>
 <body>
     <div id="control-panel">
-        <div id="status">Подключение...</div>
+        <div id="status">Подключение к серверу...</div>
         <button id="invite-btn" onclick="copyLink()">✉️ Скопировать ссылку для друга</button>
         <div id="trump-indicator" style="display:none;">Козырь: <span id="trump-icon"></span></div>
-        <button id="action-btn" style="display:none;">Действие</button>
+        <button id="action-btn" style="background:#ff9800; display:none;" onclick="socket.emit('actionButton')">Бито / Взять карты</button>
     </div>
     <div id="enemy-hand" class="hand"></div>
     <div id="game-table"></div>
@@ -38,10 +39,8 @@
     </div>
 
     <script>
-       const socket = io('https://tg-durak-play.onrender.com', {
-            transports: ['websocket', 'polling'],
-            upgrade: true
-        });
+        // Автоматическое умное подключение
+        const socket = io({ transports: ['websocket', 'polling'] });
         
         let roomId = window.location.hash.substring(1);
         if (!roomId) {
@@ -54,7 +53,7 @@
             navigator.clipboard.writeText(fullLink).then(() => {
                 alert("Ссылка скопирована! Отправь её другу.");
             }).catch(() => {
-                alert("Скопируй вручную: " + fullLink);
+                alert("Скопируй адресную строку вручную: " + fullLink);
             });
         }
 
@@ -71,31 +70,30 @@
 
         socket.on('gameState', (data) => {
             document.getElementById('invite-btn').style.display = 'none';
+            document.getElementById('status').innerText = "Игра идет! Кликай по картам, чтобы ходить.";
+            
             if (data.trump) {
                 const trInd = document.getElementById('trump-indicator');
                 const trIcon = document.getElementById('trump-icon');
                 trInd.style.display = 'flex';
                 trIcon.innerText = data.trump.suit.symbol;
-                trIcon.style.color = data.trump.suit.color === 'red' ? 'red' : '#66ccff';
+                trIcon.style.color = data.trump.suit.color === 'red' ? 'red' : 'black';
             }
-            document.getElementById('status').innerText = data.isMyTurn ? "Твой ход!" : "Ход соперника...";
-            const actBtn = document.getElementById('action-btn');
-            if (data.gameState === "PLAYING") {
-                actBtn.style.display = 'block';
-                actBtn.innerText = data.isMyTurn ? "Бито / Конец хода" : "Взять карты";
-                actBtn.onclick = () => socket.emit('actionButton');
-            } else { actBtn.style.display = 'none'; }
             
+            document.getElementById('action-btn').style.display = 'block';
+            
+            // Твоя рука
             const myHandDiv = document.getElementById('player-hand');
             myHandDiv.innerHTML = '';
             data.myHand.forEach((card, idx) => {
                 const cardEl = document.createElement('div');
                 cardEl.className = `card ${card.suit.color}`;
                 cardEl.innerHTML = `<div>${card.value.name} ${card.suit.symbol}</div><div style="font-size:24px; text-align:center">${card.suit.symbol}</div>`;
-                cardEl.onclick = () => { if (data.isMyTurn) socket.emit('playCard', idx); };
+                cardEl.onclick = () => socket.emit('playCard', idx);
                 myHandDiv.appendChild(cardEl);
             });
             
+            // Рука соперника
             const enemyHandDiv = document.getElementById('enemy-hand');
             enemyHandDiv.innerHTML = '';
             for(let i = 0; i < data.enemyCardCount; i++) {
@@ -104,6 +102,7 @@
                 enemyHandDiv.appendChild(shirt);
             }
             
+            // Игровой стол
             const tableDiv = document.getElementById('game-table');
             tableDiv.innerHTML = '';
             data.table.forEach(card => {
