@@ -32,7 +32,7 @@
         <div id="status">Подключение к игре...</div>
         <button id="invite-btn" onclick="copyLink()">✉️ Позвать друга</button>
         <div id="trump-indicator" style="display:none;">Козырь: <span id="trump-icon"></span> (<span id="deck-count">0</span>)</div>
-        <button id="action-btn" style="display:none;"></button>
+        <button id="action-btn" style="display:none;" onclick="socket.emit('actionButton')"></button>
     </div>
     
     <div id="enemy-hand" class="hand"></div>
@@ -51,7 +51,7 @@
 
         function copyLink() {
             const fullLink = window.location.origin + window.location.pathname + '#' + roomId;
-            navigator.clipboard.writeText(fullLink).then(() => alert("Ссылка скопирована! Отправь её другу в чат."));
+            navigator.clipboard.writeText(fullLink).then(() => alert("Ссылка скопирована!"));
         }
 
         socket.emit('joinRoom', roomId);
@@ -64,7 +64,6 @@
         socket.on('gameState', (data) => {
             document.getElementById('invite-btn').style.display = 'none';
             
-            // Вывод роли на экран
             const statusEl = document.getElementById('status');
             if (data.isAttacker) {
                 statusEl.innerText = "АТАКА: Твой ход! Выбери карту.";
@@ -74,7 +73,6 @@
                 statusEl.style.borderLeftColor = "#ff5722";
             }
             
-            // Счетчик колоды и козырь
             if (data.trump) {
                 document.getElementById('trump-indicator').style.display = 'flex';
                 document.getElementById('trump-icon').innerText = data.trump.suit.symbol;
@@ -82,7 +80,6 @@
                 document.getElementById('deck-count').innerText = data.deckCount;
             }
             
-            // Настройка кнопок по правилам
             const actBtn = document.getElementById('action-btn');
             if (data.table.length > 0) {
                 actBtn.style.display = 'block';
@@ -90,17 +87,15 @@
                     const allBeaten = data.table.every(p => p.defense !== null);
                     actBtn.innerText = "Бито";
                     actBtn.style.background = allBeaten ? "#4caf50" : "#777777";
-                    actBtn.disabled = !allBeaten; // Нельзя нажать Бито, пока защитник не отбился
+                    // Если не всё побито, кнопка просто серая, но клик отправить можно (сервер сам разберется)
                 } else {
                     actBtn.innerText = "Взять карты";
                     actBtn.style.background = "#e65100";
-                    actBtn.disabled = false;
                 }
             } else {
                 actBtn.style.display = 'none';
             }
             
-            // Отрисовка твоих карт
             const myHandDiv = document.getElementById('player-hand');
             myHandDiv.innerHTML = '';
             data.myHand.forEach((card, idx) => {
@@ -111,7 +106,6 @@
                 myHandDiv.appendChild(cardEl);
             });
             
-            // Рубашки карт соперника
             const enemyHandDiv = document.getElementById('enemy-hand');
             enemyHandDiv.innerHTML = '';
             for(let i = 0; i < data.enemyCardCount; i++) {
@@ -120,7 +114,6 @@
                 enemyHandDiv.appendChild(shirt);
             }
             
-            // Игровой стол парных карт
             const tableDiv = document.getElementById('game-table');
             tableDiv.innerHTML = '';
             data.table.forEach(pair => {
