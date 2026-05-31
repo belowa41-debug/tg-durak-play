@@ -9,13 +9,22 @@
         body { background-color: #1a5e20; font-family: Arial, sans-serif; color: white; margin:0; overflow:hidden; user-select: none; }
         #control-panel { position: absolute; top: 15px; left: 20px; display: flex; gap: 15px; align-items: center; z-index: 9999; }
         #status { font-weight: bold; background: rgba(0,0,0,0.5); padding: 8px 15px; border-radius: 5px; border-left: 5px solid #00bcd4; }
-        #trump-indicator { background: rgba(0,0,0,0.6); padding: 8px 15px; border-radius: 5px; border: 2px solid gold; display: flex; align-items: center; gap: 5px; }
+        
+        /* Таймер */
+        #timer-box { background: rgba(0,0,0,0.6); padding: 8px 15px; border-radius: 5px; font-weight: bold; border: 1px solid #ffeb3b; display: none; }
+        
         button { padding: 12px 24px; font-size: 15px; font-weight: bold; border: none; border-radius: 5px; cursor: pointer; background:#00bcd4; color:white; }
         #invite-btn { background: #4caf50; display: none; }
+        
+        /* Руки игроков */
         .hand { position: absolute; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; background-color: rgba(0,0,0,0.2); padding: 15px; border-radius: 10px; bottom: 20px; min-width: 300px; justify-content: center; }
         #enemy-hand { top: 20px; bottom: auto; }
-        #game-table { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 95%; max-width: 750px; height: 170px; border: 2px dashed rgba(255,255,255,0.2); border-radius: 15px; display: flex; justify-content: center; align-items: center; gap: 20px; }
+        
+        /* Игровой стол */
+        #game-table { position: absolute; top: 50%; left: 45%; transform: translate(-50%, -50%); width: 70%; max-width: 600px; height: 170px; border: 2px dashed rgba(255,255,255,0.15); border-radius: 15px; display: flex; justify-content: center; align-items: center; gap: 20px; }
         .card-pair { position: relative; width: 75px; height: 130px; }
+        
+        /* Стилизация карт */
         .card { width: 75px; height: 110px; background: white; border-radius: 8px; color: black; padding: 5px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between; font-weight: bold; box-shadow: 0 4px 6px rgba(0,0,0,0.3); cursor: pointer; transition: transform 0.1s ease; }
         .card:hover { transform: translateY(-5px); }
         .card.defense-card { position: absolute; top: 22px; left: 12px; box-shadow: -4px 4px 6px rgba(0,0,0,0.5); }
@@ -24,6 +33,15 @@
         .card.shirt * { display: none !important; }
         .red { color: red; }
         .black { color: black; }
+        
+        /* Декоративная колода сбоку */
+        #deck-3d-zone { position: absolute; right: 5%; top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; align-items: center; gap: 10px; z-index: 500; }
+        .deck-stack { position: relative; width: 110px; height: 80px; }
+        .trump-under { position: absolute; top: 0; left: 15px; transform: rotate(90deg); transform-origin: center; z-index: 10; }
+        .deck-top-shirt { position: absolute; top: -5px; left: 0; z-index: 20; box-shadow: 2px 2px 5px rgba(0,0,0,0.4); }
+        .deck-counter-badge { background: rgba(0,0,0,0.7); border: 1px solid gold; padding: 4px 10px; border-radius: 10px; font-size: 13px; font-weight: bold; }
+
+        #action-btn { z-index: 1000; }
         #overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); display: none; justify-content: center; align-items: center; z-index: 10000; flex-direction: column; }
     </style>
 </head>
@@ -31,13 +49,21 @@
     <div id="control-panel">
         <div id="status">Подключение к игре...</div>
         <button id="invite-btn" onclick="copyLink()">✉️ Позвать друга</button>
-        <div id="trump-indicator" style="display:none;">Козырь: <span id="trump-icon"></span> (<span id="deck-count">0</span>)</div>
+        <div id="timer-box">⏱️ Осталось: <span id="timer-seconds">60</span>с</div>
         <button id="action-btn" style="display:none;" onclick="socket.emit('actionButton')"></button>
     </div>
     
     <div id="enemy-hand" class="hand"></div>
     <div id="game-table"></div>
     <div id="player-hand" class="hand"></div>
+    
+    <div id="deck-3d-zone" style="display:none;">
+        <div class="deck-stack">
+            <div id="visual-trump" class="card trump-under"></div>
+            <div id="visual-shirt" class="card shirt deck-top-shirt"></div>
+        </div>
+        <div class="deck-counter-badge">Карт: <span id="deck-count-num">0</span></div>
+    </div>
     
     <div id="overlay">
         <h1 id="overlay-text"></h1>
@@ -61,25 +87,44 @@
             document.getElementById('invite-btn').style.display = text.includes("Ожидаем") ? 'block' : 'none';
         });
 
+        // Слушаем тики таймера от сервера
+        socket.on('timerUpdate', (data) => {
+            const timerBox = document.getElementById('timer-box');
+            timerBox.style.display = 'block';
+            document.getElementById('timer-seconds').innerText = data.timeLeft;
+            
+            if (data.activeId === socket.id) {
+                timerBox.style.borderColor = "#ff5722"; // Горит красным, если твой ход истекает
+            } else {
+                timerBox.style.borderColor = "#4caf50";
+            }
+        });
+
         socket.on('gameState', (data) => {
             document.getElementById('invite-btn').style.display = 'none';
+            document.getElementById('deck-3d-zone').style.display = 'flex';
             
             const statusEl = document.getElementById('status');
-            if (data.isAttacker) {
-                statusEl.innerText = "АТАКА: Твой ход! Выбери карту.";
-                statusEl.style.borderLeftColor = "#4caf50";
+            if (data.isMyActiveTurn) {
+                statusEl.innerText = data.isAttacker ? "ТВОЙ ХОД: Атакуй!" : "ТВОЙ ХОД: Отбивайся!";
+                statusEl.style.borderLeftColor = "#ffeb3b";
             } else {
-                statusEl.innerText = "ЗАЩИТА: Твой ход! Побей карту на столе.";
-                statusEl.style.borderLeftColor = "#ff5722";
+                statusEl.innerText = data.isAttacker ? "Ждем защиты соперника..." : "Ждем хода соперника...";
+                statusEl.style.borderLeftColor = "#00bcd4";
             }
             
+            // Настройка красивой колоды справа
+            document.getElementById('deck-count-num').innerText = data.deckCount;
             if (data.trump) {
-                document.getElementById('trump-indicator').style.display = 'flex';
-                document.getElementById('trump-icon').innerText = data.trump.suit.symbol;
-                document.getElementById('trump-icon').style.color = data.trump.suit.color === 'red' ? 'red' : 'black';
-                document.getElementById('deck-count').innerText = data.deckCount;
+                const vt = document.getElementById('visual-trump');
+                vt.className = `card trump-under ${data.trump.suit.color}`;
+                vt.innerHTML = `<div>${data.trump.value.name} ${data.trump.suit.symbol}</div><div style="font-size:24px; text-align:center">${data.trump.suit.symbol}</div>`;
             }
+            // Скрываем рубашку или козырь, если колода опустела
+            document.getElementById('visual-shirt').style.display = data.deckCount > 1 ? 'block' : 'none';
+            document.getElementById('visual-trump').style.display = data.deckCount > 0 ? 'block' : 'none';
             
+            // Кнопка действия
             const actBtn = document.getElementById('action-btn');
             if (data.table.length > 0) {
                 actBtn.style.display = 'block';
@@ -87,7 +132,6 @@
                     const allBeaten = data.table.every(p => p.defense !== null);
                     actBtn.innerText = "Бито";
                     actBtn.style.background = allBeaten ? "#4caf50" : "#777777";
-                    // Если не всё побито, кнопка просто серая, но клик отправить можно (сервер сам разберется)
                 } else {
                     actBtn.innerText = "Взять карты";
                     actBtn.style.background = "#e65100";
@@ -96,6 +140,7 @@
                 actBtn.style.display = 'none';
             }
             
+            // Твои карты
             const myHandDiv = document.getElementById('player-hand');
             myHandDiv.innerHTML = '';
             data.myHand.forEach((card, idx) => {
@@ -106,6 +151,7 @@
                 myHandDiv.appendChild(cardEl);
             });
             
+            // Карты соперника
             const enemyHandDiv = document.getElementById('enemy-hand');
             enemyHandDiv.innerHTML = '';
             for(let i = 0; i < data.enemyCardCount; i++) {
@@ -114,6 +160,7 @@
                 enemyHandDiv.appendChild(shirt);
             }
             
+            // Стол
             const tableDiv = document.getElementById('game-table');
             tableDiv.innerHTML = '';
             data.table.forEach(pair => {
@@ -136,14 +183,18 @@
         });
 
         socket.on('gameOver', (data) => {
+            document.getElementById('timer-box').style.display = 'none';
             const overlay = document.getElementById('overlay');
             const text = document.getElementById('overlay-text');
             overlay.style.display = 'flex';
-            if (data.winner === 'draw') {
-                text.innerText = "Ничья! 🤝";
-            } else {
-                text.innerText = data.winner === socket.id ? "Вы выиграли! 🎉" : "Вы проиграли... Дурак! 🥺";
+            
+            let message = data.winner === socket.id ? "Вы выиграли! 🎉" : "Вы проиграли... Дурак! 🥺";
+            if (data.reason === 'timeout') {
+                message += data.winner === socket.id ? " (Соперник не успел сделать ход)" : " (Время на ход вышло)";
             }
+            if (data.winner === 'draw') message = "Ничья! 🤝";
+            
+            text.innerText = message;
         });
     </script>
 </body>
