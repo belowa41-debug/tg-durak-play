@@ -17,14 +17,16 @@
         button:hover { background: #00acc1; }
         #invite-btn { background: #4caf50; display: none; }
         #invite-btn:hover { background: #43a047; }
+        #back-btn { background: #607d8b; display: none; }
+        #back-btn:hover { background: #546e7a; }
         
         .hand { position: absolute; left: 50%; transform: translateX(-50%); display: flex; gap: -15px; padding: 15px; bottom: 15px; min-width: 320px; justify-content: center; }
         #enemy-hand { top: 15px; bottom: auto; }
         
-        #game-table { position: absolute; top: 50%; left: 42%; transform: translate(-50%, -50%); width: 68%; height: 200px; border: 2px dashed rgba(255,255,255,0.2); border-radius: 20px; display: flex; justify-content: center; align-items: center; gap: 25px; background: rgba(0,0,0,0.05); }
-        .card-pair { position: relative; width: 85px; height: 140px; }
+        #game-table { position: absolute; top: 50%; left: 42%; transform: translate(-50%, -50%); width: 68%; height: 220px; border: 2px dashed rgba(255,255,255,0.2); border-radius: 20px; display: flex; justify-content: center; align-items: center; gap: 25px; background: rgba(0,0,0,0.05); }
+        .card-pair { position: relative; width: 125px; height: 165px; }
         
-        .card { width: 85px; height: 125px; background: #ffffff; border-radius: 10px; color: black; padding: 8px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between; font-weight: bold; box-shadow: 0 5px 10px rgba(0,0,0,0.3); cursor: pointer; transition: transform 0.15s ease, box-shadow 0.15s ease; border: 1px solid #ccc; position: relative; }
+        .card { width: 85px; height: 125px; background: linear-gradient(145deg, #ffffff, #f3f3f3); border-radius: 10px; color: black; padding: 8px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between; font-weight: bold; box-shadow: 0 5px 10px rgba(0,0,0,0.3); cursor: pointer; transition: transform 0.15s ease, box-shadow 0.15s ease; border: 1px solid #ccc; position: relative; }
         
         .hand .card { margin-right: -20px; }
         .hand .card:hover { transform: translateY(-25px) scale(1.08); z-index: 100 !important; box-shadow: 0 15px 20px rgba(0,0,0,0.4); }
@@ -34,7 +36,8 @@
         
         .card.is-trump-card { border: 2px solid #ffd700 !important; box-shadow: 0 0 8px rgba(255,215,0,0.4), 0 5px 10px rgba(0,0,0,0.3); }
         
-        .card.defense-card { position: absolute; top: 25px; left: 15px; box-shadow: -5px 5px 12px rgba(0,0,0,0.5); z-index: 10; }
+        .card.attack-card { transform: rotate(-7deg); z-index: 1; }
+        .card.defense-card { position: absolute; top: 34px; left: 34px; transform: rotate(9deg); box-shadow: -5px 5px 12px rgba(0,0,0,0.5); z-index: 10; }
         
         .card.shirt { background: linear-gradient(135deg, #1976d2, #0d47a1); border: 2px solid white; cursor: default; }
         .card.shirt::after { content: ''; position: absolute; top: 5px; left: 5px; right: 5px; bottom: 5px; border: 1px dashed rgba(255,255,255,0.3); border-radius: 6px; }
@@ -63,6 +66,9 @@
         .start-card p { margin: 0 0 22px; color: rgba(255,255,255,0.82); font-size: 15px; line-height: 1.45; }
         .start-menu { display: flex; flex-direction: column; gap: 12px; }
         .start-menu button { width: 100%; font-size: 17px; padding: 14px 18px; }
+        .stars-balance-panel { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,215,0,0.55); border-radius: 14px; padding: 12px; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+        .stars-balance-panel strong { font-size: 18px; color: #ffd54f; }
+        .stars-balance-panel button { width: auto; padding: 8px 12px; font-size: 13px; background: #ff9800; }
         .start-random-btn { background: #00bcd4; }
         .start-friend-btn { background: #4caf50; }
         .start-stars-btn { background: linear-gradient(135deg, #ffb300, #ff6f00); }
@@ -85,8 +91,9 @@
             #player-hand { bottom: 6px; }
 
             #game-table { top: 46%; left: 50%; width: 94%; height: 145px; gap: 10px; padding: 10px; box-sizing: border-box; justify-content: flex-start; overflow-x: auto; overflow-y: hidden; }
-            .card-pair { width: 66px; height: 100px; flex: 0 0 66px; }
-            .card.defense-card { top: 16px; left: 10px; }
+            .card-pair { width: 88px; height: 110px; flex: 0 0 88px; }
+            .card.defense-card { top: 22px; left: 22px; }
+            .card.attack-card { transform: rotate(-6deg); }
 
             #deck-3d-zone { right: 8px; top: 61%; gap: 7px; }
             .deck-stack { width: 112px; height: 86px; }
@@ -96,6 +103,8 @@
             .start-card { padding: 22px; border-radius: 18px; }
             .start-card h1 { font-size: 28px; }
             .start-menu button { font-size: 15px; padding: 13px 14px; }
+            .stars-balance-panel { flex-direction: column; align-items: stretch; }
+            .stars-balance-panel button { width: 100%; }
         }
     </style>
 </head>
@@ -104,6 +113,10 @@
         <div class="start-card">
             <h1>Дурак Онлайн</h1>
             <p>Нажми “Начать игру” для случайного соперника, пригласи друга или выбери режим Telegram Stars.</p>
+            <div class="stars-balance-panel">
+                <div>Баланс: <strong><span id="stars-balance">0</span> ⭐</strong></div>
+                <button onclick="buyStars()">Пополнить</button>
+            </div>
             <div class="start-menu">
                 <button class="start-random-btn" onclick="startRandomGame()">▶️ Начать игру</button>
                 <button class="start-friend-btn" onclick="startFriendGame()">✉️ Позвать друга</button>
@@ -116,6 +129,7 @@
     <div id="control-panel">
         <div id="status">Подключение к игре...</div>
         <button id="invite-btn" onclick="copyLink()">✉️ Позвать друга</button>
+        <button id="back-btn" onclick="returnToMenu()">⬅️ Назад</button>
         <div id="timer-box">⏱️ Ход: <span id="timer-seconds">60</span>с</div>
         <button id="action-btn" style="display:none;" onclick="socket.emit('actionButton')"></button>
     </div>
@@ -174,6 +188,13 @@
         const socket = io({ transports: ['websocket', 'polling'] });
         let roomId = getTelegramStartParam() || getHashRoomId();
         let hasJoinedGame = false;
+        let starsBalance = 0;
+        let starsPaymentsEnabled = false;
+
+        socket.emit('registerPlayer', {
+            initData: telegramWebApp ? telegramWebApp.initData : '',
+            user: telegramWebApp && telegramWebApp.initDataUnsafe ? telegramWebApp.initDataUnsafe.user : null
+        });
 
         function createRoomId() {
             return Math.random().toString(36).substring(2, 7);
@@ -181,6 +202,20 @@
 
         function hideStartScreen() {
             document.getElementById('start-screen').style.display = 'none';
+            document.getElementById('back-btn').style.display = 'block';
+        }
+
+        function showStartScreen() {
+            document.getElementById('start-screen').style.display = 'flex';
+            document.getElementById('back-btn').style.display = 'none';
+            document.getElementById('invite-btn').style.display = 'none';
+            document.getElementById('timer-box').style.display = 'none';
+            document.getElementById('action-btn').style.display = 'none';
+            document.getElementById('deck-3d-zone').style.display = 'none';
+            document.getElementById('enemy-hand').innerHTML = '';
+            document.getElementById('player-hand').innerHTML = '';
+            document.getElementById('game-table').innerHTML = '';
+            document.getElementById('status').innerText = "Выберите режим игры";
         }
 
         function setRoomId(nextRoomId) {
@@ -199,13 +234,13 @@
             socket.emit('joinRoom', roomId);
         }
 
-        function startRandomGame() {
+        function startRandomGame(statusText = "Ищем случайного соперника...") {
             if (hasJoinedGame) return;
 
             hasJoinedGame = true;
             hideStartScreen();
             window.location.hash = '';
-            document.getElementById('status').innerText = "Ищем случайного соперника...";
+            document.getElementById('status').innerText = statusText;
             socket.emit('findRandomGame');
         }
 
@@ -215,12 +250,13 @@
         }
 
         function startStarsGame() {
-            const message = "Игра за Telegram Stars скоро будет подключена. Для настоящей оплаты нужно добавить Stars invoice на сервере.";
-            if (telegramWebApp && telegramWebApp.showAlert) {
-                telegramWebApp.showAlert(message);
-            } else {
-                alert(message);
+            if (starsBalance < 1) {
+                showMessage("Для игры за Stars нужен минимум 1 ⭐ на балансе.");
+                buyStars();
+                return;
             }
+
+            socket.emit('startStarsGame');
         }
 
         function exitGame() {
@@ -233,6 +269,34 @@
                 window.history.back();
             } else {
                 alert("Можно закрыть вкладку браузера.");
+            }
+        }
+
+        function returnToMenu() {
+            if (hasJoinedGame) {
+                socket.emit('leaveGame');
+            }
+
+            hasJoinedGame = false;
+            roomId = '';
+            window.location.hash = '';
+            showStartScreen();
+        }
+
+        function buyStars(amount = 10) {
+            if (!starsPaymentsEnabled) {
+                showMessage("Оплата Stars пока недоступна: нужно настроить BOT_TOKEN на сервере и открыть игру через Telegram.");
+                return;
+            }
+
+            socket.emit('buyStars', amount);
+        }
+
+        function showMessage(message) {
+            if (telegramWebApp && telegramWebApp.showAlert) {
+                telegramWebApp.showAlert(message);
+            } else {
+                alert(message);
             }
         }
 
@@ -272,6 +336,32 @@
         }
 
         if (roomId) { joinRoom(roomId); }
+
+        socket.on('starsBalance', (data) => {
+            starsBalance = data.balance || 0;
+            starsPaymentsEnabled = Boolean(data.paymentsEnabled && data.registered);
+            document.getElementById('stars-balance').innerText = starsBalance;
+        });
+
+        socket.on('starsInvoice', (data) => {
+            if (telegramWebApp && telegramWebApp.openInvoice) {
+                telegramWebApp.openInvoice(data.url, (status) => {
+                    if (status === 'paid') {
+                        showMessage("Оплата прошла. Баланс обновится автоматически.");
+                    }
+                });
+            } else {
+                window.open(data.url, '_blank');
+            }
+        });
+
+        socket.on('starsError', (message) => {
+            showMessage(message);
+        });
+
+        socket.on('starsGameReady', () => {
+            startRandomGame("Ищем соперника для игры за Stars...");
+        });
         
         socket.on('status', (text) => { 
             document.getElementById('status').innerText = text;
@@ -356,7 +446,7 @@
                 
                 const attCard = document.createElement('div');
                 const isAttTrump = data.trump && (pair.attack.suit.id === data.trump.suit.id);
-                attCard.className = `card ${pair.attack.suit.color} ${isAttTrump ? 'is-trump-card' : ''}`;
+                attCard.className = `card attack-card ${pair.attack.suit.color} ${isAttTrump ? 'is-trump-card' : ''}`;
                 attCard.innerHTML = `<div class="card-corner"><div>${pair.attack.value.name}</div><div>${pair.attack.suit.symbol}</div></div><div class="card-center">${pair.attack.suit.symbol}</div>`;
                 pairDiv.appendChild(attCard);
                 
