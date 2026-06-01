@@ -2,6 +2,8 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
+const crypto = require('crypto');
+const TelegramBot = require('node-telegram-bot-api');
 
 const app = express();
 const server = http.createServer(app);
@@ -28,8 +30,93 @@ const VALUES = [
 
 let rooms = {};
 let randomQueue = [];
+let starsBalances = {};
+let socketPlayers = {};
+let playerSockets = {};
+
+const BOT_TOKEN = process.env.BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN || '';
+const bot = BOT_TOKEN ? new TelegramBot(BOT_TOKEN, { polling: true }) : null;
+
+if (bot) {
+    bot.on('pre_checkout_query', (query) => {
+        bot.answerPreCheckoutQuery(query.id, true).catch(console.error);
+    });
+
+    bot.on('successful_payment', (msg) => {
+        const payment = msg.successful_payment;
+        if (!payment || payment.currency !== 'XTR') return;
+
+        const payload = parseStarsPayload(payment.invoice_payload);
+        if (!payload) return;
+
+        addStars(payload.playerId, payload.amount);
+    });
+}
 
 io.on('connection', (socket) => {
+    socket.on('registerPlayer', (data = {}) => {
+        const player = getTelegramPlayer(data);
+        if (!player) {
+            socket.emit('starsBalance', { balance: 0, paymentsEnabled: Boolean(bot), registered: false });
+            return;
+        }
+
+        socketPlayers[socket.id] = player.id;
+        if (!playerSockets[player.id]) playerSockets[player.id] = new Set();
+        playerSockets[player.id].add(socket.id);
+
+        socket.emit('starsBalance', {
+            balance: starsBalances[player.id] || 0,
+            paymentsEnabled: Boolean(bot),
+            registered: true,
+            name: player.name
+        });
+    });
+
+    socket.on('buyStars', async (amount = 10) => {
+        const playerId = socketPlayers[socket.id];
+        const safeAmount = Math.max(1, Math.min(1000, Number(amount) || 10));
+
+        if (!bot || !playerId) {
+            socket.emit('starsError', "Оплата Stars пока недоступна. Нужно настроить BOT_TOKEN на сервере и открыть игру через Telegram.");
+            return;
+        }
+
+        try {
+            const payload = `stars:${playerId}:${safeAmount}:${Date.now()}`;
+            const invoiceLink = await bot.createInvoiceLink(
+                `${safeAmount} Stars`,
+                `Пополнение баланса Дурак Онлайн на ${safeAmount} Stars`,
+                payload,
+                '',
+                'XTR',
+                [{ label: `${safeAmount} Stars`, amount: safeAmount }]
+            );
+
+            socket.emit('starsInvoice', { url: invoiceLink });
+        } catch (error) {
+            console.error(error);
+            socket.emit('starsError', "Не удалось создать платеж Stars. Проверь BOT_TOKEN и настройки бота.");
+        }
+    });
+
+    socket.on('startStarsGame', () => {
+        const playerId = socketPlayers[socket.id];
+        if (!playerId) {
+            socket.emit('starsError', "Открой игру через Telegram, чтобы играть за Stars.");
+            return;
+        }
+
+        if ((starsBalances[playerId] || 0) < 1) {
+            socket.emit('starsError', "Недостаточно Stars. Пополни баланс и попробуй снова.");
+            return;
+        }
+
+        starsBalances[playerId] -= 1;
+        emitStarsBalance(playerId);
+        socket.emit('starsGameReady');
+    });
+
     socket.on('joinRoom', (roomId) => {
         roomId = sanitizeRoomId(roomId);
         if (!roomId) return;
@@ -64,6 +151,18 @@ io.on('connection', (socket) => {
 
         joinGameRoom(opponentSocket, roomId);
         joinGameRoom(socket, roomId);
+    });
+
+    socket.on('leaveGame', () => {
+        leaveRandomQueue(socket.id);
+        let roomId = getPlayerRoom(socket.id);
+        if (roomId && rooms[roomId]) {
+            clearInterval(rooms[roomId].timer);
+            socket.leave(roomId);
+            socket.to(roomId).emit('status', "Соперник вышел из игры.");
+            delete rooms[roomId];
+        }
+        socket.emit('status', "Вы вернулись в главное меню.");
     });
 
     socket.on('playCard', (cardIdx) => {
@@ -161,6 +260,13 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => {
         leaveRandomQueue(socket.id);
+        let playerId = socketPlayers[socket.id];
+        if (playerId && playerSockets[playerId]) {
+            playerSockets[playerId].delete(socket.id);
+            if (playerSockets[playerId].size === 0) delete playerSockets[playerId];
+        }
+        delete socketPlayers[socket.id];
+
         let roomId = getPlayerRoom(socket.id);
         if (roomId && rooms[roomId]) {
             clearInterval(rooms[roomId].timer);
@@ -169,6 +275,73 @@ io.on('connection', (socket) => {
         }
     });
 });
+
+function getTelegramPlayer(data) {
+    const verifiedUser = verifyTelegramInitData(data.initData);
+    const unsafeUser = data.user || {};
+    const user = verifiedUser || (!BOT_TOKEN && unsafeUser.id ? unsafeUser : null);
+
+    if (!user || !user.id) return null;
+
+    return {
+        id: String(user.id),
+        name: [user.first_name, user.last_name].filter(Boolean).join(' ') || user.username || `Игрок ${user.id}`
+    };
+}
+
+function verifyTelegramInitData(initData) {
+    if (!BOT_TOKEN || !initData) return null;
+
+    const params = new URLSearchParams(initData);
+    const hash = params.get('hash');
+    params.delete('hash');
+    if (!hash) return null;
+
+    const dataCheckString = [...params.entries()]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, value]) => `${key}=${value}`)
+        .join('\n');
+
+    const secret = crypto.createHmac('sha256', 'WebAppData').update(BOT_TOKEN).digest();
+    const calculatedHash = crypto.createHmac('sha256', secret).update(dataCheckString).digest('hex');
+
+    if (!/^[a-f0-9]{64}$/i.test(hash)) return null;
+    if (!crypto.timingSafeEqual(Buffer.from(calculatedHash, 'hex'), Buffer.from(hash, 'hex'))) return null;
+
+    try {
+        return JSON.parse(params.get('user') || 'null');
+    } catch {
+        return null;
+    }
+}
+
+function parseStarsPayload(payload) {
+    const parts = String(payload || '').split(':');
+    if (parts.length < 3 || parts[0] !== 'stars') return null;
+
+    const amount = Number(parts[2]);
+    if (!parts[1] || !Number.isFinite(amount) || amount <= 0) return null;
+
+    return { playerId: parts[1], amount };
+}
+
+function addStars(playerId, amount) {
+    starsBalances[playerId] = (starsBalances[playerId] || 0) + amount;
+    emitStarsBalance(playerId);
+}
+
+function emitStarsBalance(playerId) {
+    const sockets = playerSockets[playerId];
+    if (!sockets) return;
+
+    for (let socketId of sockets) {
+        io.to(socketId).emit('starsBalance', {
+            balance: starsBalances[playerId] || 0,
+            paymentsEnabled: Boolean(bot),
+            registered: true
+        });
+    }
+}
 
 function sanitizeRoomId(roomId) {
     return String(roomId || '').replace(/[^a-zA-Z0-9_-]/g, '').substring(0, 64);
