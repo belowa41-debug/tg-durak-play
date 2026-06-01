@@ -633,4 +633,8 @@ function getPlayerRoom(socketId) {
 }
 
 const PORT = process.env.PORT || 10000;
-server.listen(PORT, '0.0.0.0', () => console.log(`Сервер запущен на порту ${PORT}`));
+server.listen(PORT, '0.0.0.0', () => {
+    console.log(`Сервер запущен на порту ${PORT}`);
+    console.log(`BOT_TOKEN configured: ${BOT_TOKEN ? 'yes' : 'no'}`);
+    console.log(`HOUSE_PLAYER_ID: ${HOUSE_PLAYER_ID || 'not set'}`);
+});
