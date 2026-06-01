@@ -101,15 +101,25 @@
 
         function getTelegramStartParam() {
             const params = new URLSearchParams(window.location.search);
+            const hashValue = window.location.hash.substring(1);
+            const hashParams = hashValue.includes('=') ? new URLSearchParams(hashValue) : new URLSearchParams();
+
             return normalizeRoomId(
                 (telegramWebApp && telegramWebApp.initDataUnsafe && telegramWebApp.initDataUnsafe.start_param) ||
                 params.get('tgWebAppStartParam') ||
-                params.get('startapp')
+                params.get('startapp') ||
+                hashParams.get('tgWebAppStartParam') ||
+                hashParams.get('startapp')
             );
         }
 
+        function getHashRoomId() {
+            const hashValue = window.location.hash.substring(1);
+            return hashValue.includes('=') ? '' : normalizeRoomId(hashValue);
+        }
+
         const socket = io({ transports: ['websocket', 'polling'] });
-        let roomId = normalizeRoomId(window.location.hash.substring(1)) || getTelegramStartParam();
+        let roomId = getTelegramStartParam() || getHashRoomId();
         if (!roomId) { roomId = Math.random().toString(36).substring(2, 7); window.location.hash = roomId; }
         if (window.location.hash.substring(1) !== roomId) { window.location.hash = roomId; }
 
