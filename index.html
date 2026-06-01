@@ -57,6 +57,33 @@
         #action-btn { z-index: 1000; font-size: 16px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.4); }
         #overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.92); display: none; justify-content: center; align-items: center; z-index: 10000; flex-direction: column; }
         #overlay h1 { font-size: 36px; margin-bottom: 20px; }
+
+        @media (max-width: 700px) {
+            #control-panel { top: 8px; left: 8px; right: 8px; flex-wrap: wrap; gap: 6px; }
+            #status { padding: 8px 10px; font-size: 13px; }
+            #timer-box { padding: 8px 10px; font-size: 13px; }
+            button { padding: 9px 12px; font-size: 13px; }
+
+            .card { width: 56px; height: 82px; border-radius: 7px; padding: 5px; }
+            .card .card-corner { font-size: 12px; }
+            .card .card-center { font-size: 24px; }
+
+            .hand { left: 0; right: 0; transform: none; width: 100%; min-width: 0; box-sizing: border-box; justify-content: flex-start; gap: 6px; padding: 6px 10px; overflow-x: auto; overflow-y: visible; }
+            .hand .card { flex: 0 0 auto; margin-right: 0; }
+            .hand .card:hover { transform: translateY(-10px) scale(1.03); }
+            #enemy-hand { top: 72px; bottom: auto; }
+            #player-hand { bottom: 6px; }
+
+            #game-table { top: 46%; left: 50%; width: 94%; height: 145px; gap: 10px; padding: 10px; box-sizing: border-box; justify-content: flex-start; overflow-x: auto; overflow-y: hidden; }
+            .card-pair { width: 66px; height: 100px; flex: 0 0 66px; }
+            .card.defense-card { top: 16px; left: 10px; }
+
+            #deck-3d-zone { right: 8px; top: 61%; gap: 7px; }
+            .deck-stack { width: 112px; height: 86px; }
+            .trump-under { top: 20px; left: -8px; }
+            .deck-top-shirt { top: 4px; left: 48px; }
+            .deck-counter-badge, .trump-info-badge { padding: 4px 8px; font-size: 12px; }
+        }
     </style>
 </head>
 <body>
@@ -120,8 +147,7 @@
 
         const socket = io({ transports: ['websocket', 'polling'] });
         let roomId = getTelegramStartParam() || getHashRoomId();
-        if (!roomId) { roomId = Math.random().toString(36).substring(2, 7); window.location.hash = roomId; }
-        if (window.location.hash.substring(1) !== roomId) { window.location.hash = roomId; }
+        if (roomId && window.location.hash.substring(1) !== roomId) { window.location.hash = roomId; }
 
         function getInviteLink() {
             return `${TELEGRAM_APP_URL}?startapp=${encodeURIComponent(roomId)}`;
@@ -158,7 +184,11 @@
                 .catch(() => prompt("Скопируйте ссылку:", fullLink));
         }
 
-        socket.emit('joinRoom', roomId);
+        if (roomId) {
+            socket.emit('joinRoom', roomId);
+        } else {
+            socket.emit('findRandomGame');
+        }
         
         socket.on('status', (text) => { 
             document.getElementById('status').innerText = text;
