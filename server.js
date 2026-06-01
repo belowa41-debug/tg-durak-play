@@ -28,6 +28,7 @@ const VALUES = [
     { name: 'Q', strength: 12 }, { name: 'K', strength: 13 }, { name: 'A', strength: 14 }
 ];
 const MIN_STARS_WAGER = 50;
+const MIN_STARS_WITHDRAW = 100;
 const WINNER_PAYOUT_RATE = 0.8;
 
 let rooms = {};
@@ -37,6 +38,7 @@ let starsBalances = {};
 let socketPlayers = {};
 let playerSockets = {};
 let houseStarsBalance = 0;
+let withdrawRequests = [];
 
 const BOT_TOKEN = process.env.BOT_TOKEN || '';
 const OWNER_TELEGRAM_USER_ID = process.env.OWNER_TELEGRAM_USER_ID || '7713568416';
@@ -104,6 +106,41 @@ io.on('connection', (socket) => {
             console.error(error);
             socket.emit('starsError', "Не удалось создать платеж Stars. Проверь BOT_TOKEN и настройки бота.");
         }
+    });
+
+    socket.on('withdrawStars', (amount = MIN_STARS_WITHDRAW) => {
+        const playerId = socketPlayers[socket.id];
+        const safeAmount = Math.floor(Number(amount) || MIN_STARS_WITHDRAW);
+
+        if (!playerId) {
+            socket.emit('starsError', "Открой игру через Telegram, чтобы запросить вывод Stars.");
+            return;
+        }
+
+        if (safeAmount < MIN_STARS_WITHDRAW) {
+            socket.emit('starsError', `Минимальная сумма вывода — ${MIN_STARS_WITHDRAW} ⭐.`);
+            return;
+        }
+
+        if ((starsBalances[playerId] || 0) < safeAmount) {
+            socket.emit('starsError', "Недостаточно Stars на балансе для вывода.");
+            return;
+        }
+
+        starsBalances[playerId] -= safeAmount;
+        emitStarsBalance(playerId);
+
+        const request = {
+            id: `${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
+            playerId,
+            amount: safeAmount,
+            createdAt: new Date().toISOString(),
+            status: 'pending'
+        };
+        withdrawRequests.push(request);
+
+        notifyOwnerAboutWithdraw(request);
+        socket.emit('withdrawCreated', request);
     });
 
     socket.on('startStarsGame', (stake = MIN_STARS_WAGER) => {
@@ -405,6 +442,21 @@ function addHouseStars(amount) {
     houseStarsBalance += amount;
 }
 
+function notifyOwnerAboutWithdraw(request) {
+    const message = [
+        'Новая заявка на вывод Stars',
+        `Игрок: ${request.playerId}`,
+        `Сумма: ${request.amount} ⭐`,
+        `ID заявки: ${request.id}`
+    ].join('\n');
+
+    console.log(message);
+
+    if (bot && HOUSE_PLAYER_ID) {
+        bot.sendMessage(HOUSE_PLAYER_ID, message).catch(console.error);
+    }
+}
+
 function emitStarsBalance(playerId) {
     const sockets = playerSockets[playerId];
     if (!sockets) return;
@@ -494,8 +546,8 @@ function finishGame(roomId, winner, reason) {
 
     clearInterval(room.timer);
     room.state = "ENDED";
-    settleStarsGame(room, winner);
-    io.to(roomId).emit('gameOver', { winner, reason });
+    const starsPayout = settleStarsGame(room, winner);
+    io.to(roomId).emit('gameOver', { winner, reason, starsPayout });
 }
 
 function settleStarsGame(room, winnerSocketId) {
@@ -510,14 +562,27 @@ function settleStarsGame(room, winnerSocketId) {
             const houseFee = (room.starsPot || 0) - payout;
             addStars(winnerPlayerId, payout);
             addHouseStars(houseFee);
+            return {
+                pot: room.starsPot || 0,
+                winnerPayout: payout,
+                houseFee,
+                winnerPlayerId,
+                housePlayerId: HOUSE_PLAYER_ID || null
+            };
         }
-        return;
+        return null;
     }
 
     Object.entries(room.starsStakes || {}).forEach(([playerId, stake]) => {
         starsBalances[playerId] = (starsBalances[playerId] || 0) + Number(stake || 0);
         emitStarsBalance(playerId);
     });
+    return {
+        pot: room.starsPot || 0,
+        winnerPayout: 0,
+        houseFee: 0,
+        isRefund: true
+    };
 }
 
 function canBeat(attack, defense, trumpSuitId) {
