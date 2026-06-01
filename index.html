@@ -52,22 +52,55 @@
         /* НАСТОЯЩАЯ 3D КОЛОДА КАРТ СБОКУ */
         #deck-3d-zone { position: absolute; right: 6%; top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; align-items: center; gap: 15px; z-index: 500; }
         .deck-stack { position: relative; width: 130px; height: 100px; display: flex; justify-content: center; align-items: center; }
-        .deck-stack { position: relative; width: 170px; height: 150px; }
         
         /* Козырная карта лежит плашмя снизу */
         .trump-under { position: absolute; transform: rotate(90deg); z-index: 1; box-shadow: 3px 0 8px rgba(0,0,0,0.3); cursor: default; }
-        /* Козырная карта выступает из-под колоды, чтобы ее было видно */
-        .trump-under { position: absolute; top: 32px; left: -5px; transform: rotate(90deg); transform-origin: center center; z-index: 1; box-shadow: 3px 0 8px rgba(0,0,0,0.3); cursor: default; }
         
         /* Закрывающая её сверху основная колода рубашкой вверх */
         .deck-top-shirt { position: absolute; transform: translateY(-3px) translateX(-5px); z-index: 10; cursor: default; }
-        .deck-top-shirt { position: absolute; top: 12px; left: 62px; z-index: 10; cursor: default; }
         .deck-counter-badge { background: rgba(0,0,0,0.75); border: 1px solid gold; padding: 5px 14px; border-radius: 12px; font-size: 14px; font-weight: bold; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
 
         #action-btn { z-index: 1000; font-size: 16px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.4); }
         #overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.92); display: none; justify-content: center; align-items: center; z-index: 10000; flex-direction: column; }
         #overlay h1 { font-size: 36px; margin-bottom: 20px; }
-    </style>
+    </style>#deck-3d-zone {
+    position: absolute;
+    right: 6%;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 15px;
+    z-index: 500;
+}
+
+.deck-stack {
+    position: relative;
+    width: 170px;
+    height: 150px;
+}
+
+/* Козырная карта выступает из-под колоды, чтобы ее было видно */
+.trump-under {
+    position: absolute;
+    top: 32px;
+    left: -5px;
+    transform: rotate(90deg);
+    transform-origin: center center;
+    z-index: 1;
+    box-shadow: 3px 0 8px rgba(0,0,0,0.3);
+    cursor: default;
+}
+
+/* Закрывающая её сверху основная колода рубашкой вверх */
+.deck-top-shirt {
+    position: absolute;
+    top: 12px;
+    left: 62px;
+    z-index: 10;
+    cursor: default;
+}
 </head>
 <body>
     <div id="control-panel">
@@ -166,3 +199,64 @@
             // Отрендерить карты игрока (моя рука)
             const myHandDiv = document.getElementById('player-hand');
             myHandDiv.innerHTML = '';
+            data.myHand.forEach((card, idx) => {
+                const cardEl = document.createElement('div');
+                const isTrump = data.trump && (card.suit.id === data.trump.suit.id);
+                cardEl.className = `card ${card.suit.color} ${isTrump ? 'is-trump-card' : ''}`;
+                cardEl.style.zIndex = idx;
+                cardEl.innerHTML = `<div class="card-corner"><div>${card.value.name}</div><div>${card.suit.symbol}</div></div><div class="card-center">${card.suit.symbol}</div>`;
+                cardEl.onclick = () => socket.emit('playCard', idx);
+                myHandDiv.appendChild(cardEl);
+            });
+            
+            // Рубашки противника
+            const enemyHandDiv = document.getElementById('enemy-hand');
+            enemyHandDiv.innerHTML = '';
+            for(let i = 0; i < data.enemyCardCount; i++) {
+                const shirt = document.createElement('div');
+                shirt.className = 'card shirt';
+                shirt.style.zIndex = i;
+                enemyHandDiv.appendChild(shirt);
+            }
+            
+            // Стол
+            const tableDiv = document.getElementById('game-table');
+            tableDiv.innerHTML = '';
+            data.table.forEach(pair => {
+                const pairDiv = document.createElement('div');
+                pairDiv.className = 'card-pair';
+                
+                const attCard = document.createElement('div');
+                const isAttTrump = data.trump && (pair.attack.suit.id === data.trump.suit.id);
+                attCard.className = `card ${pair.attack.suit.color} ${isAttTrump ? 'is-trump-card' : ''}`;
+                attCard.innerHTML = `<div class="card-corner"><div>${pair.attack.value.name}</div><div>${pair.attack.suit.symbol}</div></div><div class="card-center">${pair.attack.suit.symbol}</div>`;
+                pairDiv.appendChild(attCard);
+                
+                if (pair.defense) {
+                    const defCard = document.createElement('div');
+                    const isDefTrump = data.trump && (pair.defense.suit.id === data.trump.suit.id);
+                    defCard.className = `card defense-card ${pair.defense.suit.color} ${isDefTrump ? 'is-trump-card' : ''}`;
+                    defCard.innerHTML = `<div class="card-corner"><div>${pair.defense.value.name}</div><div>${pair.defense.suit.symbol}</div></div><div class="card-center">${pair.defense.suit.symbol}</div>`;
+                    pairDiv.appendChild(defCard);
+                }
+                tableDiv.appendChild(pairDiv);
+            });
+        });
+
+        socket.on('gameOver', (data) => {
+            document.getElementById('timer-box').style.display = 'none';
+            const overlay = document.getElementById('overlay');
+            const text = document.getElementById('overlay-text');
+            overlay.style.display = 'flex';
+            
+            let message = data.winner === socket.id ? "Вы выиграли! 🎉" : "Вы проиграли... Дурак! 🥺";
+            if (data.reason === 'timeout') {
+                message += data.winner === socket.id ? " (Соперник превысил лимит времени)" : " (Время на ход истекло)";
+            }
+            if (data.winner === 'draw') message = "Ничья! 🤝";
+            
+            text.innerText = message;
+        });
+    </script>
+</body>
+</html>
