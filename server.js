@@ -27,23 +27,43 @@ const VALUES = [
 ];
 
 let rooms = {};
+let randomQueue = [];
 
 io.on('connection', (socket) => {
     socket.on('joinRoom', (roomId) => {
-        socket.join(roomId);
-        if (!rooms[roomId]) {
-            rooms[roomId] = { players: [], deck: [], trump: null, table: [], attackerIdx: 0, state: "WAITING", timer: null, timeLeft: 60, activeTurnPlayerId: null };
+        roomId = sanitizeRoomId(roomId);
+        if (!roomId) return;
+
+        leaveRandomQueue(socket.id);
+        joinGameRoom(socket, roomId);
+    });
+
+    socket.on('findRandomGame', () => {
+        let currentRoomId = getPlayerRoom(socket.id);
+        if (currentRoomId && rooms[currentRoomId]) {
+            if (rooms[currentRoomId].state === "PLAYING") {
+                updateRoom(currentRoomId);
+                return;
+            }
+
+            removePlayerFromRoom(currentRoomId, socket.id);
         }
-        let room = rooms[roomId];
-        if (room.players.length < 2 && !room.players.some(p => p.id === socket.id)) {
-            room.players.push({ id: socket.id, hand: [], name: `Игрок ${room.players.length + 1}` });
+
+        leaveRandomQueue(socket.id);
+
+        const opponentId = randomQueue.find(id => id !== socket.id && io.sockets.sockets.get(id));
+        if (!opponentId) {
+            randomQueue.push(socket.id);
+            socket.emit('status', "Ищем случайного соперника...");
+            return;
         }
-        if (room.players.length === 2 && room.state === "WAITING") {
-            initGame(room, roomId);
-        } else if (room.state === "WAITING") {
-            socket.emit('status', "Ожидаем второго игрока...");
-        }
-        updateRoom(roomId);
+
+        leaveRandomQueue(opponentId);
+        const opponentSocket = io.sockets.sockets.get(opponentId);
+        const roomId = createRandomRoomId();
+
+        joinGameRoom(opponentSocket, roomId);
+        joinGameRoom(socket, roomId);
     });
 
     socket.on('playCard', (cardIdx) => {
@@ -140,6 +160,7 @@ io.on('connection', (socket) => {
     });
 
     socket.on('disconnect', () => {
+        leaveRandomQueue(socket.id);
         let roomId = getPlayerRoom(socket.id);
         if (roomId && rooms[roomId]) {
             clearInterval(rooms[roomId].timer);
@@ -148,6 +169,53 @@ io.on('connection', (socket) => {
         }
     });
 });
+
+function sanitizeRoomId(roomId) {
+    return String(roomId || '').replace(/[^a-zA-Z0-9_-]/g, '').substring(0, 64);
+}
+
+function createRandomRoomId() {
+    return `random-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+}
+
+function leaveRandomQueue(socketId) {
+    randomQueue = randomQueue.filter(id => id !== socketId && io.sockets.sockets.get(id));
+}
+
+function removePlayerFromRoom(roomId, socketId) {
+    let room = rooms[roomId];
+    if (!room) return;
+
+    room.players = room.players.filter(player => player.id !== socketId);
+    io.sockets.sockets.get(socketId)?.leave(roomId);
+
+    if (room.players.length === 0 || room.state === "WAITING") {
+        clearInterval(room.timer);
+        delete rooms[roomId];
+    }
+}
+
+function joinGameRoom(socket, roomId) {
+    if (!socket) return;
+
+    socket.join(roomId);
+    if (!rooms[roomId]) {
+        rooms[roomId] = { players: [], deck: [], trump: null, table: [], attackerIdx: 0, state: "WAITING", timer: null, timeLeft: 60, activeTurnPlayerId: null };
+    }
+
+    let room = rooms[roomId];
+    if (room.players.length < 2 && !room.players.some(p => p.id === socket.id)) {
+        room.players.push({ id: socket.id, hand: [], name: `Игрок ${room.players.length + 1}` });
+    }
+
+    if (room.players.length === 2 && room.state === "WAITING") {
+        initGame(room, roomId);
+    } else if (room.state === "WAITING") {
+        socket.emit('status', "Ожидаем второго игрока...");
+    }
+
+    updateRoom(roomId);
+}
 
 function canBeat(attack, defense, trumpSuitId) {
     if (attack.suit.id === defense.suit.id) {
