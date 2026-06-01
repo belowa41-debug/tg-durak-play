@@ -36,8 +36,10 @@ let starsQueue = [];
 let starsBalances = {};
 let socketPlayers = {};
 let playerSockets = {};
+let houseStarsBalance = 0;
 
 const BOT_TOKEN = process.env.BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN || '';
+const HOUSE_PLAYER_ID = process.env.HOUSE_TELEGRAM_USER_ID || process.env.OWNER_TELEGRAM_USER_ID || '';
 const bot = BOT_TOKEN ? new TelegramBot(BOT_TOKEN, { polling: true }) : null;
 
 if (bot) {
@@ -391,6 +393,17 @@ function addStars(playerId, amount) {
     emitStarsBalance(playerId);
 }
 
+function addHouseStars(amount) {
+    if (!amount || amount <= 0) return;
+
+    if (HOUSE_PLAYER_ID) {
+        addStars(HOUSE_PLAYER_ID, amount);
+        return;
+    }
+
+    houseStarsBalance += amount;
+}
+
 function emitStarsBalance(playerId) {
     const sockets = playerSockets[playerId];
     if (!sockets) return;
@@ -493,7 +506,9 @@ function settleStarsGame(room, winnerSocketId) {
         const winnerPlayerId = room.players.find(player => player.id === winnerSocketId)?.playerId;
         if (winnerPlayerId) {
             const payout = Math.floor((room.starsPot || 0) * WINNER_PAYOUT_RATE);
+            const houseFee = (room.starsPot || 0) - payout;
             addStars(winnerPlayerId, payout);
+            addHouseStars(houseFee);
         }
         return;
     }
