@@ -38,8 +38,9 @@ let socketPlayers = {};
 let playerSockets = {};
 let houseStarsBalance = 0;
 
-const BOT_TOKEN = process.env.BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN || '';
-const HOUSE_PLAYER_ID = process.env.HOUSE_TELEGRAM_USER_ID || process.env.OWNER_TELEGRAM_USER_ID || '';
+const BOT_TOKEN = process.env.BOT_TOKEN || '';
+const OWNER_TELEGRAM_USER_ID = process.env.OWNER_TELEGRAM_USER_ID || '7713568416';
+const HOUSE_PLAYER_ID = process.env.HOUSE_TELEGRAM_USER_ID || OWNER_TELEGRAM_USER_ID;
 const bot = BOT_TOKEN ? new TelegramBot(BOT_TOKEN, { polling: true }) : null;
 
 if (bot) {
