@@ -68,7 +68,9 @@
         .start-menu button { width: 100%; font-size: 17px; padding: 14px 18px; }
         .stars-balance-panel { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,215,0,0.55); border-radius: 14px; padding: 12px; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
         .stars-balance-panel strong { font-size: 18px; color: #ffd54f; }
+        .stars-balance-actions { display: flex; gap: 8px; }
         .stars-balance-panel button { width: auto; padding: 8px 12px; font-size: 13px; background: #ff9800; }
+        .stars-withdraw-btn { background: #7e57c2 !important; }
         .start-random-btn { background: #00bcd4; }
         .start-friend-btn { background: #4caf50; }
         .start-stars-btn { background: linear-gradient(135deg, #ffb300, #ff6f00); }
@@ -104,6 +106,7 @@
             .start-card h1 { font-size: 28px; }
             .start-menu button { font-size: 15px; padding: 13px 14px; }
             .stars-balance-panel { flex-direction: column; align-items: stretch; }
+            .stars-balance-actions { flex-direction: column; }
             .stars-balance-panel button { width: 100%; }
         }
     </style>
@@ -115,7 +118,10 @@
             <p>Нажми “Начать игру” для случайного соперника, пригласи друга или выбери режим Telegram Stars.</p>
             <div class="stars-balance-panel">
                 <div>Баланс: <strong><span id="stars-balance">0</span> ⭐</strong></div>
-                <button onclick="buyStars()">Пополнить</button>
+                <div class="stars-balance-actions">
+                    <button onclick="buyStars()">Пополнить</button>
+                    <button class="stars-withdraw-btn" onclick="withdrawStars()">Вывести</button>
+                </div>
             </div>
             <div class="start-menu">
                 <button class="start-random-btn" onclick="startRandomGame()">▶️ Начать игру</button>
@@ -187,6 +193,7 @@
 
         const socket = io({ transports: ['websocket', 'polling'] });
         const MIN_STARS_WAGER = 50;
+        const MIN_STARS_WITHDRAW = 100;
         let roomId = getTelegramStartParam() || getHashRoomId();
         let hasJoinedGame = false;
         let currentGameStarted = false;
@@ -316,6 +323,24 @@
             socket.emit('buyStars', amount);
         }
 
+        function withdrawStars() {
+            const rawAmount = prompt(`Сколько Stars вывести? Минимум ${MIN_STARS_WITHDRAW} ⭐:`, String(MIN_STARS_WITHDRAW));
+            if (rawAmount === null) return;
+
+            const amount = Math.floor(Number(rawAmount));
+            if (!Number.isFinite(amount) || amount < MIN_STARS_WITHDRAW) {
+                showMessage(`Минимальная сумма вывода — ${MIN_STARS_WITHDRAW} ⭐.`);
+                return;
+            }
+
+            if (starsBalance < amount) {
+                showMessage("Недостаточно Stars на балансе для вывода.");
+                return;
+            }
+
+            socket.emit('withdrawStars', amount);
+        }
+
         function showMessage(message) {
             if (telegramWebApp && telegramWebApp.showAlert) {
                 telegramWebApp.showAlert(message);
@@ -381,6 +406,10 @@
 
         socket.on('starsError', (message) => {
             showMessage(message);
+        });
+
+        socket.on('withdrawCreated', (request) => {
+            showMessage(`Заявка на вывод ${request.amount} ⭐ создана. ID: ${request.id}`);
         });
 
         socket.on('status', (text) => { 
@@ -495,6 +524,13 @@
                 message += data.winner === socket.id ? " (Соперник превысил лимит времени)" : " (Время на ход истекло)";
             }
             if (data.winner === 'draw') message = "Ничья! 🤝";
+            if (data.starsPayout) {
+                if (data.starsPayout.isRefund) {
+                    message += `\nСтавки возвращены игрокам: ${data.starsPayout.pot} ⭐`;
+                } else {
+                    message += `\nПобедителю: ${data.starsPayout.winnerPayout} ⭐\nАвтору: ${data.starsPayout.houseFee} ⭐`;
+                }
+            }
             
             text.innerText = message;
         });
