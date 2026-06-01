@@ -57,6 +57,16 @@
         #action-btn { z-index: 1000; font-size: 16px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.4); }
         #overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.92); display: none; justify-content: center; align-items: center; z-index: 10000; flex-direction: column; }
         #overlay h1 { font-size: 36px; margin-bottom: 20px; }
+        #start-screen { position: fixed; inset: 0; background: radial-gradient(circle at center, rgba(46,125,50,0.96), rgba(7,45,12,0.98)); z-index: 9000; display: flex; justify-content: center; align-items: center; padding: 20px; box-sizing: border-box; }
+        .start-card { width: min(420px, 100%); background: rgba(0,0,0,0.62); border: 2px solid rgba(255,255,255,0.18); border-radius: 22px; padding: 28px; box-shadow: 0 18px 40px rgba(0,0,0,0.45); text-align: center; }
+        .start-card h1 { margin: 0 0 8px; font-size: 34px; }
+        .start-card p { margin: 0 0 22px; color: rgba(255,255,255,0.82); font-size: 15px; line-height: 1.45; }
+        .start-menu { display: flex; flex-direction: column; gap: 12px; }
+        .start-menu button { width: 100%; font-size: 17px; padding: 14px 18px; }
+        .start-random-btn { background: #00bcd4; }
+        .start-friend-btn { background: #4caf50; }
+        .start-stars-btn { background: linear-gradient(135deg, #ffb300, #ff6f00); }
+        .start-exit-btn { background: #616161; }
 
         @media (max-width: 700px) {
             #control-panel { top: 8px; left: 8px; right: 8px; flex-wrap: wrap; gap: 6px; }
@@ -83,10 +93,26 @@
             .trump-under { top: 20px; left: -8px; }
             .deck-top-shirt { top: 4px; left: 48px; }
             .deck-counter-badge, .trump-info-badge { padding: 4px 8px; font-size: 12px; }
+            .start-card { padding: 22px; border-radius: 18px; }
+            .start-card h1 { font-size: 28px; }
+            .start-menu button { font-size: 15px; padding: 13px 14px; }
         }
     </style>
 </head>
 <body>
+    <div id="start-screen">
+        <div class="start-card">
+            <h1>Дурак Онлайн</h1>
+            <p>Нажми “Начать игру” для случайного соперника, пригласи друга или выбери режим Telegram Stars.</p>
+            <div class="start-menu">
+                <button class="start-random-btn" onclick="startRandomGame()">▶️ Начать игру</button>
+                <button class="start-friend-btn" onclick="startFriendGame()">✉️ Позвать друга</button>
+                <button class="start-stars-btn" onclick="startStarsGame()">⭐ Играть за Stars</button>
+                <button class="start-exit-btn" onclick="exitGame()">🚪 Выйти</button>
+            </div>
+        </div>
+    </div>
+
     <div id="control-panel">
         <div id="status">Подключение к игре...</div>
         <button id="invite-btn" onclick="copyLink()">✉️ Позвать друга</button>
@@ -147,7 +173,68 @@
 
         const socket = io({ transports: ['websocket', 'polling'] });
         let roomId = getTelegramStartParam() || getHashRoomId();
-        if (roomId && window.location.hash.substring(1) !== roomId) { window.location.hash = roomId; }
+        let hasJoinedGame = false;
+
+        function createRoomId() {
+            return Math.random().toString(36).substring(2, 7);
+        }
+
+        function hideStartScreen() {
+            document.getElementById('start-screen').style.display = 'none';
+        }
+
+        function setRoomId(nextRoomId) {
+            roomId = normalizeRoomId(nextRoomId);
+            if (roomId && window.location.hash.substring(1) !== roomId) { window.location.hash = roomId; }
+        }
+
+        function joinRoom(nextRoomId) {
+            if (hasJoinedGame) return;
+
+            setRoomId(nextRoomId);
+            if (!roomId) return;
+
+            hasJoinedGame = true;
+            hideStartScreen();
+            socket.emit('joinRoom', roomId);
+        }
+
+        function startRandomGame() {
+            if (hasJoinedGame) return;
+
+            hasJoinedGame = true;
+            hideStartScreen();
+            window.location.hash = '';
+            document.getElementById('status').innerText = "Ищем случайного соперника...";
+            socket.emit('findRandomGame');
+        }
+
+        function startFriendGame() {
+            joinRoom(roomId || createRoomId());
+            copyLink();
+        }
+
+        function startStarsGame() {
+            const message = "Игра за Telegram Stars скоро будет подключена. Для настоящей оплаты нужно добавить Stars invoice на сервере.";
+            if (telegramWebApp && telegramWebApp.showAlert) {
+                telegramWebApp.showAlert(message);
+            } else {
+                alert(message);
+            }
+        }
+
+        function exitGame() {
+            if (telegramWebApp) {
+                telegramWebApp.close();
+                return;
+            }
+
+            if (window.history.length > 1) {
+                window.history.back();
+            } else {
+                alert("Можно закрыть вкладку браузера.");
+            }
+        }
 
         function getInviteLink() {
             return `${TELEGRAM_APP_URL}?startapp=${encodeURIComponent(roomId)}`;
@@ -184,11 +271,7 @@
                 .catch(() => prompt("Скопируйте ссылку:", fullLink));
         }
 
-        if (roomId) {
-            socket.emit('joinRoom', roomId);
-        } else {
-            socket.emit('findRandomGame');
-        }
+        if (roomId) { joinRoom(roomId); }
         
         socket.on('status', (text) => { 
             document.getElementById('status').innerText = text;
