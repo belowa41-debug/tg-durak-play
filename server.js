@@ -27,9 +27,12 @@ const VALUES = [
     { name: '9', strength: 9 }, { name: '10', strength: 10 }, { name: 'J', strength: 11 },
     { name: 'Q', strength: 12 }, { name: 'K', strength: 13 }, { name: 'A', strength: 14 }
 ];
+const MIN_STARS_WAGER = 50;
+const WINNER_PAYOUT_RATE = 0.8;
 
 let rooms = {};
 let randomQueue = [];
+let starsQueue = [];
 let starsBalances = {};
 let socketPlayers = {};
 let playerSockets = {};
@@ -100,21 +103,65 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('startStarsGame', () => {
+    socket.on('startStarsGame', (stake = MIN_STARS_WAGER) => {
         const playerId = socketPlayers[socket.id];
+        const safeStake = Math.floor(Number(stake) || MIN_STARS_WAGER);
         if (!playerId) {
             socket.emit('starsError', "Открой игру через Telegram, чтобы играть за Stars.");
             return;
         }
 
-        if ((starsBalances[playerId] || 0) < 1) {
+        if (safeStake < MIN_STARS_WAGER) {
+            socket.emit('starsError', `Минимальная ставка для игры за Stars — ${MIN_STARS_WAGER} ⭐.`);
+            return;
+        }
+
+        let currentRoomId = getPlayerRoom(socket.id);
+        if (currentRoomId && rooms[currentRoomId]?.state === "PLAYING") {
+            socket.emit('starsError', "Игра уже началась. Выйти можно только после окончания партии.");
+            return;
+        }
+
+        if ((starsBalances[playerId] || 0) < safeStake) {
             socket.emit('starsError', "Недостаточно Stars. Пополни баланс и попробуй снова.");
             return;
         }
 
-        starsBalances[playerId] -= 1;
+        if (currentRoomId && rooms[currentRoomId]) {
+            removePlayerFromRoom(currentRoomId, socket.id);
+        }
+
+        leaveRandomQueue(socket.id);
+        leaveStarsQueue(socket.id, true);
+
+        starsBalances[playerId] -= safeStake;
         emitStarsBalance(playerId);
-        socket.emit('starsGameReady');
+
+        const opponent = starsQueue.find(entry => (
+            entry.socketId !== socket.id &&
+            entry.stake === safeStake &&
+            io.sockets.sockets.get(entry.socketId)
+        ));
+
+        if (!opponent) {
+            starsQueue.push({ socketId: socket.id, playerId, stake: safeStake });
+            socket.emit('status', `Ищем соперника за ${safeStake} ⭐...`);
+            return;
+        }
+
+        leaveStarsQueue(opponent.socketId, false);
+        const opponentSocket = io.sockets.sockets.get(opponent.socketId);
+        const roomId = createRandomRoomId();
+        const pot = safeStake * 2;
+
+        joinGameRoom(opponentSocket, roomId, {
+            mode: 'stars',
+            starsPot: pot,
+            starsStake: safeStake,
+            starsStakes: { [opponent.playerId]: opponent.stake, [playerId]: safeStake },
+            starsSettled: false
+        });
+        joinGameRoom(socket, roomId);
     });
 
     socket.on('joinRoom', (roomId) => {
@@ -122,6 +169,7 @@ io.on('connection', (socket) => {
         if (!roomId) return;
 
         leaveRandomQueue(socket.id);
+        leaveStarsQueue(socket.id, true);
         joinGameRoom(socket, roomId);
     });
 
@@ -137,6 +185,7 @@ io.on('connection', (socket) => {
         }
 
         leaveRandomQueue(socket.id);
+        leaveStarsQueue(socket.id, true);
 
         const opponentId = randomQueue.find(id => id !== socket.id && io.sockets.sockets.get(id));
         if (!opponentId) {
@@ -155,8 +204,14 @@ io.on('connection', (socket) => {
 
     socket.on('leaveGame', () => {
         leaveRandomQueue(socket.id);
+        leaveStarsQueue(socket.id, true);
         let roomId = getPlayerRoom(socket.id);
         if (roomId && rooms[roomId]) {
+            if (rooms[roomId].state === "PLAYING") {
+                socket.emit('status', "Игра уже началась. Выйти можно только после окончания партии.");
+                return;
+            }
+
             clearInterval(rooms[roomId].timer);
             socket.leave(roomId);
             socket.to(roomId).emit('status', "Соперник вышел из игры.");
@@ -260,6 +315,7 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => {
         leaveRandomQueue(socket.id);
+        leaveStarsQueue(socket.id, true);
         let playerId = socketPlayers[socket.id];
         if (playerId && playerSockets[playerId]) {
             playerSockets[playerId].delete(socket.id);
@@ -269,9 +325,14 @@ io.on('connection', (socket) => {
 
         let roomId = getPlayerRoom(socket.id);
         if (roomId && rooms[roomId]) {
-            clearInterval(rooms[roomId].timer);
-            io.to(roomId).emit('status', "Соперник отключился.");
-            delete rooms[roomId];
+            if (rooms[roomId].state === "PLAYING") {
+                const winner = rooms[roomId].players.find(p => p.id !== socket.id);
+                finishGame(roomId, winner ? winner.id : 'draw', 'disconnect');
+            } else {
+                clearInterval(rooms[roomId].timer);
+                io.to(roomId).emit('status', "Соперник отключился.");
+                delete rooms[roomId];
+            }
         }
     });
 });
@@ -355,6 +416,18 @@ function leaveRandomQueue(socketId) {
     randomQueue = randomQueue.filter(id => id !== socketId && io.sockets.sockets.get(id));
 }
 
+function leaveStarsQueue(socketId, shouldRefund) {
+    const queuedEntries = starsQueue.filter(entry => entry.socketId === socketId);
+    starsQueue = starsQueue.filter(entry => entry.socketId !== socketId && io.sockets.sockets.get(entry.socketId));
+
+    if (!shouldRefund) return;
+
+    queuedEntries.forEach(entry => {
+        starsBalances[entry.playerId] = (starsBalances[entry.playerId] || 0) + entry.stake;
+        emitStarsBalance(entry.playerId);
+    });
+}
+
 function removePlayerFromRoom(roomId, socketId) {
     let room = rooms[roomId];
     if (!room) return;
@@ -368,17 +441,28 @@ function removePlayerFromRoom(roomId, socketId) {
     }
 }
 
-function joinGameRoom(socket, roomId) {
+function joinGameRoom(socket, roomId, options = {}) {
     if (!socket) return;
 
     socket.join(roomId);
     if (!rooms[roomId]) {
-        rooms[roomId] = { players: [], deck: [], trump: null, table: [], attackerIdx: 0, state: "WAITING", timer: null, timeLeft: 60, activeTurnPlayerId: null };
+        rooms[roomId] = {
+            players: [],
+            deck: [],
+            trump: null,
+            table: [],
+            attackerIdx: 0,
+            state: "WAITING",
+            timer: null,
+            timeLeft: 60,
+            activeTurnPlayerId: null,
+            ...options
+        };
     }
 
     let room = rooms[roomId];
     if (room.players.length < 2 && !room.players.some(p => p.id === socket.id)) {
-        room.players.push({ id: socket.id, hand: [], name: `Игрок ${room.players.length + 1}` });
+        room.players.push({ id: socket.id, playerId: socketPlayers[socket.id] || null, hand: [], name: `Игрок ${room.players.length + 1}` });
     }
 
     if (room.players.length === 2 && room.state === "WAITING") {
@@ -388,6 +472,36 @@ function joinGameRoom(socket, roomId) {
     }
 
     updateRoom(roomId);
+}
+
+function finishGame(roomId, winner, reason) {
+    let room = rooms[roomId];
+    if (!room || room.state === "ENDED") return;
+
+    clearInterval(room.timer);
+    room.state = "ENDED";
+    settleStarsGame(room, winner);
+    io.to(roomId).emit('gameOver', { winner, reason });
+}
+
+function settleStarsGame(room, winnerSocketId) {
+    if (room.mode !== 'stars' || room.starsSettled) return;
+
+    room.starsSettled = true;
+
+    if (winnerSocketId && winnerSocketId !== 'draw') {
+        const winnerPlayerId = room.players.find(player => player.id === winnerSocketId)?.playerId;
+        if (winnerPlayerId) {
+            const payout = Math.floor((room.starsPot || 0) * WINNER_PAYOUT_RATE);
+            addStars(winnerPlayerId, payout);
+        }
+        return;
+    }
+
+    Object.entries(room.starsStakes || {}).forEach(([playerId, stake]) => {
+        starsBalances[playerId] = (starsBalances[playerId] || 0) + Number(stake || 0);
+        emitStarsBalance(playerId);
+    });
 }
 
 function canBeat(attack, defense, trumpSuitId) {
@@ -441,10 +555,8 @@ function resetRoomTimer(room, roomId) {
     room.timer = setInterval(() => {
         room.timeLeft--;
         if (room.timeLeft <= 0) {
-            clearInterval(room.timer);
-            room.state = "ENDED";
             let winner = room.players.find(p => p.id !== room.activeTurnPlayerId);
-            io.to(roomId).emit('gameOver', { winner: winner ? winner.id : 'draw', reason: 'timeout' });
+            finishGame(roomId, winner ? winner.id : 'draw', 'timeout');
         } else {
             io.to(roomId).emit('timerUpdate', { timeLeft: room.timeLeft, activeId: room.activeTurnPlayerId });
         }
@@ -466,11 +578,11 @@ function checkWin(roomId) {
         let p1 = room.players[0];
         let p2 = room.players[1];
         if (p1.hand.length === 0 && p2.hand.length === 0) {
-            clearInterval(room.timer); room.state = "ENDED"; io.to(roomId).emit('gameOver', { winner: 'draw' });
+            finishGame(roomId, 'draw');
         } else if (p1.hand.length === 0) {
-            clearInterval(room.timer); room.state = "ENDED"; io.to(roomId).emit('gameOver', { winner: p1.id });
+            finishGame(roomId, p1.id);
         } else if (p2.hand.length === 0) {
-            clearInterval(room.timer); room.state = "ENDED"; io.to(roomId).emit('gameOver', { winner: p2.id });
+            finishGame(roomId, p2.id);
         }
     }
 }

@@ -120,7 +120,7 @@
             <div class="start-menu">
                 <button class="start-random-btn" onclick="startRandomGame()">▶️ Начать игру</button>
                 <button class="start-friend-btn" onclick="startFriendGame()">✉️ Позвать друга</button>
-                <button class="start-stars-btn" onclick="startStarsGame()">⭐ Играть за Stars</button>
+                <button class="start-stars-btn" onclick="startStarsGame()">⭐ Играть за Stars от 50</button>
                 <button class="start-exit-btn" onclick="exitGame()">🚪 Выйти</button>
             </div>
         </div>
@@ -186,8 +186,10 @@
         }
 
         const socket = io({ transports: ['websocket', 'polling'] });
+        const MIN_STARS_WAGER = 50;
         let roomId = getTelegramStartParam() || getHashRoomId();
         let hasJoinedGame = false;
+        let currentGameStarted = false;
         let starsBalance = 0;
         let starsPaymentsEnabled = false;
 
@@ -216,6 +218,7 @@
             document.getElementById('player-hand').innerHTML = '';
             document.getElementById('game-table').innerHTML = '';
             document.getElementById('status').innerText = "Выберите режим игры";
+            currentGameStarted = false;
         }
 
         function setRoomId(nextRoomId) {
@@ -238,6 +241,7 @@
             if (hasJoinedGame) return;
 
             hasJoinedGame = true;
+            currentGameStarted = false;
             hideStartScreen();
             window.location.hash = '';
             document.getElementById('status').innerText = statusText;
@@ -250,13 +254,28 @@
         }
 
         function startStarsGame() {
-            if (starsBalance < 1) {
-                showMessage("Для игры за Stars нужен минимум 1 ⭐ на балансе.");
+            const rawStake = prompt(`Ставка Stars (минимум ${MIN_STARS_WAGER} ⭐):`, String(MIN_STARS_WAGER));
+            if (rawStake === null) return;
+
+            const stake = Math.floor(Number(rawStake));
+            if (!Number.isFinite(stake) || stake < MIN_STARS_WAGER) {
+                showMessage(`Минимальная ставка для игры за Stars — ${MIN_STARS_WAGER} ⭐.`);
+                return;
+            }
+
+            if (starsBalance < stake) {
+                showMessage(`Для этой игры нужно ${stake} ⭐. Пополни баланс и попробуй снова.`);
                 buyStars();
                 return;
             }
 
-            socket.emit('startStarsGame');
+            if (hasJoinedGame) return;
+
+            hasJoinedGame = true;
+            currentGameStarted = false;
+            hideStartScreen();
+            document.getElementById('status').innerText = `Ищем соперника за ${stake} ⭐...`;
+            socket.emit('startStarsGame', stake);
         }
 
         function exitGame() {
@@ -273,6 +292,11 @@
         }
 
         function returnToMenu() {
+            if (currentGameStarted) {
+                showMessage("Игра уже началась. Выйти можно только после окончания партии.");
+                return;
+            }
+
             if (hasJoinedGame) {
                 socket.emit('leaveGame');
             }
@@ -283,7 +307,7 @@
             showStartScreen();
         }
 
-        function buyStars(amount = 10) {
+        function buyStars(amount = MIN_STARS_WAGER) {
             if (!starsPaymentsEnabled) {
                 showMessage("Оплата Stars пока недоступна: нужно настроить BOT_TOKEN на сервере и открыть игру через Telegram.");
                 return;
@@ -359,10 +383,6 @@
             showMessage(message);
         });
 
-        socket.on('starsGameReady', () => {
-            startRandomGame("Ищем соперника для игры за Stars...");
-        });
-        
         socket.on('status', (text) => { 
             document.getElementById('status').innerText = text;
             document.getElementById('invite-btn').style.display = text.includes("Ожидаем") ? 'block' : 'none';
@@ -376,6 +396,8 @@
         });
 
         socket.on('gameState', (data) => {
+            currentGameStarted = true;
+            document.getElementById('back-btn').style.display = 'none';
             document.getElementById('invite-btn').style.display = 'none';
             document.getElementById('deck-3d-zone').style.display = 'flex';
             
@@ -463,6 +485,7 @@
 
         socket.on('gameOver', (data) => {
             document.getElementById('timer-box').style.display = 'none';
+            currentGameStarted = false;
             const overlay = document.getElementById('overlay');
             const text = document.getElementById('overlay-text');
             overlay.style.display = 'flex';
