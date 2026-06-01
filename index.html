@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Дурак Онлайн</title>
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
         body { background-color: #1b5e20; font-family: 'Segoe UI', Arial, sans-serif; color: white; margin:0; overflow:hidden; user-select: none; }
         
@@ -85,13 +86,66 @@
     </div>
 
     <script>
+        const TELEGRAM_APP_URL = 'https://t.me/my_durak_play_bot/game';
+        const telegramWebApp = window.Telegram && window.Telegram.WebApp;
+
+        if (telegramWebApp) {
+            telegramWebApp.ready();
+            telegramWebApp.expand();
+        }
+
+        function normalizeRoomId(value) {
+            const cleanValue = (value || '').replace(/[^a-zA-Z0-9_-]/g, '');
+            return cleanValue.substring(0, 64);
+        }
+
+        function getTelegramStartParam() {
+            const params = new URLSearchParams(window.location.search);
+            return normalizeRoomId(
+                (telegramWebApp && telegramWebApp.initDataUnsafe && telegramWebApp.initDataUnsafe.start_param) ||
+                params.get('tgWebAppStartParam') ||
+                params.get('startapp')
+            );
+        }
+
         const socket = io({ transports: ['websocket', 'polling'] });
-        let roomId = window.location.hash.substring(1);
+        let roomId = normalizeRoomId(window.location.hash.substring(1)) || getTelegramStartParam();
         if (!roomId) { roomId = Math.random().toString(36).substring(2, 7); window.location.hash = roomId; }
+        if (window.location.hash.substring(1) !== roomId) { window.location.hash = roomId; }
+
+        function getInviteLink() {
+            return `${TELEGRAM_APP_URL}?startapp=${encodeURIComponent(roomId)}`;
+        }
+
+        function copyTextToClipboard(text) {
+            if (navigator.clipboard && window.isSecureContext) {
+                return navigator.clipboard.writeText(text);
+            }
+
+            return new Promise((resolve, reject) => {
+                const textArea = document.createElement('textarea');
+                textArea.value = text;
+                textArea.style.position = 'fixed';
+                textArea.style.opacity = '0';
+                document.body.appendChild(textArea);
+                textArea.focus();
+                textArea.select();
+
+                try {
+                    document.execCommand('copy') ? resolve() : reject();
+                } catch (error) {
+                    reject(error);
+                } finally {
+                    document.body.removeChild(textArea);
+                }
+            });
+        }
 
         function copyLink() {
-            const fullLink = window.location.origin + window.location.pathname + '#' + roomId;
-            navigator.clipboard.writeText(fullLink).then(() => alert("Ссылка скопирована!"));
+            const fullLink = getInviteLink();
+            copyTextToClipboard(fullLink)
+                .then(() => alert("Ссылка Telegram скопирована!"))
+                .catch(() => prompt("Скопируйте ссылку:", fullLink));
         }
 
         socket.emit('joinRoom', roomId);
