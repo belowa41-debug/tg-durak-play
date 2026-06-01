@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: tg-durak-play
+    env: node
+    plan: free
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: BOT_TOKEN
+        sync: false
+      - key: OWNER_TELEGRAM_USER_ID
+        value: "7713568416"
