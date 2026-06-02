@@ -3,6 +3,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
 const crypto = require('crypto');
+const fs = require('fs');
 const TelegramBot = require('node-telegram-bot-api');
 
 const app = express();
@@ -43,7 +44,10 @@ let withdrawRequests = [];
 const BOT_TOKEN = process.env.BOT_TOKEN || '';
 const OWNER_TELEGRAM_USER_ID = process.env.OWNER_TELEGRAM_USER_ID || '7713568416';
 const HOUSE_PLAYER_ID = process.env.HOUSE_TELEGRAM_USER_ID || OWNER_TELEGRAM_USER_ID;
+const STARS_DATA_FILE = process.env.STARS_DATA_FILE || path.join(__dirname, 'data', 'stars-state.json');
 const bot = BOT_TOKEN ? new TelegramBot(BOT_TOKEN, { polling: true }) : null;
+
+loadStarsState();
 
 if (bot) {
     bot.on('pre_checkout_query', (query) => {
@@ -75,6 +79,7 @@ io.on('connection', (socket) => {
 
         socket.emit('starsBalance', {
             balance: starsBalances[player.id] || 0,
+            pendingWithdraw: getPendingWithdrawAmount(player.id),
             paymentsEnabled: Boolean(bot),
             registered: true,
             name: player.name
@@ -128,6 +133,7 @@ io.on('connection', (socket) => {
         }
 
         starsBalances[playerId] -= safeAmount;
+        saveStarsState();
         emitStarsBalance(playerId);
 
         const request = {
@@ -138,6 +144,7 @@ io.on('connection', (socket) => {
             status: 'pending'
         };
         withdrawRequests.push(request);
+        saveStarsState();
 
         notifyOwnerAboutWithdraw(request);
         socket.emit('withdrawCreated', request);
@@ -175,6 +182,7 @@ io.on('connection', (socket) => {
         leaveStarsQueue(socket.id, true);
 
         starsBalances[playerId] -= safeStake;
+        saveStarsState();
         emitStarsBalance(playerId);
 
         const opponent = starsQueue.find(entry => (
@@ -426,8 +434,41 @@ function parseStarsPayload(payload) {
     return { playerId: parts[1], amount };
 }
 
+function loadStarsState() {
+    try {
+        if (!fs.existsSync(STARS_DATA_FILE)) return;
+
+        const state = JSON.parse(fs.readFileSync(STARS_DATA_FILE, 'utf8'));
+        starsBalances = state.starsBalances || {};
+        houseStarsBalance = state.houseStarsBalance || 0;
+        withdrawRequests = state.withdrawRequests || [];
+    } catch (error) {
+        console.error('Не удалось загрузить Stars состояние:', error);
+    }
+}
+
+function saveStarsState() {
+    try {
+        fs.mkdirSync(path.dirname(STARS_DATA_FILE), { recursive: true });
+        fs.writeFileSync(STARS_DATA_FILE, JSON.stringify({
+            starsBalances,
+            houseStarsBalance,
+            withdrawRequests
+        }, null, 2));
+    } catch (error) {
+        console.error('Не удалось сохранить Stars состояние:', error);
+    }
+}
+
+function getPendingWithdrawAmount(playerId) {
+    return withdrawRequests
+        .filter(request => request.playerId === playerId && request.status === 'pending')
+        .reduce((sum, request) => sum + Number(request.amount || 0), 0);
+}
+
 function addStars(playerId, amount) {
     starsBalances[playerId] = (starsBalances[playerId] || 0) + amount;
+    saveStarsState();
     emitStarsBalance(playerId);
 }
 
@@ -440,6 +481,7 @@ function addHouseStars(amount) {
     }
 
     houseStarsBalance += amount;
+    saveStarsState();
 }
 
 function notifyOwnerAboutWithdraw(request) {
@@ -464,6 +506,7 @@ function emitStarsBalance(playerId) {
     for (let socketId of sockets) {
         io.to(socketId).emit('starsBalance', {
             balance: starsBalances[playerId] || 0,
+            pendingWithdraw: getPendingWithdrawAmount(playerId),
             paymentsEnabled: Boolean(bot),
             registered: true
         });
@@ -490,6 +533,7 @@ function leaveStarsQueue(socketId, shouldRefund) {
 
     queuedEntries.forEach(entry => {
         starsBalances[entry.playerId] = (starsBalances[entry.playerId] || 0) + entry.stake;
+        saveStarsState();
         emitStarsBalance(entry.playerId);
     });
 }
@@ -575,6 +619,7 @@ function settleStarsGame(room, winnerSocketId) {
 
     Object.entries(room.starsStakes || {}).forEach(([playerId, stake]) => {
         starsBalances[playerId] = (starsBalances[playerId] || 0) + Number(stake || 0);
+        saveStarsState();
         emitStarsBalance(playerId);
     });
     return {
