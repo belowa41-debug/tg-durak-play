@@ -63,6 +63,35 @@ if (bot) {
 
         addStars(payload.playerId, payload.amount);
     });
+
+    bot.onText(/^\/withdraws$/, (msg) => {
+        if (!isOwnerChat(msg.chat.id)) return;
+
+        const pending = withdrawRequests.filter(request => request.status === 'pending');
+        if (pending.length === 0) {
+            bot.sendMessage(msg.chat.id, 'Нет заявок на вывод.').catch(console.error);
+            return;
+        }
+
+        const message = pending.map(request => (
+            `ID: ${request.id}\nИгрок: ${request.playerId}\nСумма: ${request.amount} ⭐\nДата: ${request.createdAt}`
+        )).join('\n\n');
+        bot.sendMessage(msg.chat.id, message).catch(console.error);
+    });
+
+    bot.onText(/^\/approve_withdraw\s+(.+)$/, (msg, match) => {
+        if (!isOwnerChat(msg.chat.id)) return;
+
+        const result = approveWithdraw(match[1].trim());
+        bot.sendMessage(msg.chat.id, result.message).catch(console.error);
+    });
+
+    bot.onText(/^\/reject_withdraw\s+(.+)$/, (msg, match) => {
+        if (!isOwnerChat(msg.chat.id)) return;
+
+        const result = rejectWithdraw(match[1].trim());
+        bot.sendMessage(msg.chat.id, result.message).catch(console.error);
+    });
 }
 
 io.on('connection', (socket) => {
@@ -489,7 +518,11 @@ function notifyOwnerAboutWithdraw(request) {
         'Новая заявка на вывод Stars',
         `Игрок: ${request.playerId}`,
         `Сумма: ${request.amount} ⭐`,
-        `ID заявки: ${request.id}`
+        `ID заявки: ${request.id}`,
+        '',
+        `Подтвердить: /approve_withdraw ${request.id}`,
+        `Отклонить: /reject_withdraw ${request.id}`,
+        'Список заявок: /withdraws'
     ].join('\n');
 
     console.log(message);
@@ -497,6 +530,41 @@ function notifyOwnerAboutWithdraw(request) {
     if (bot && HOUSE_PLAYER_ID) {
         bot.sendMessage(HOUSE_PLAYER_ID, message).catch(console.error);
     }
+}
+
+function isOwnerChat(chatId) {
+    return String(chatId) === String(HOUSE_PLAYER_ID);
+}
+
+function findPendingWithdraw(requestId) {
+    return withdrawRequests.find(request => request.id === requestId && request.status === 'pending');
+}
+
+function approveWithdraw(requestId) {
+    const request = findPendingWithdraw(requestId);
+    if (!request) {
+        return { ok: false, message: `Заявка ${requestId} не найдена или уже обработана.` };
+    }
+
+    request.status = 'approved';
+    request.resolvedAt = new Date().toISOString();
+    saveStarsState();
+
+    return { ok: true, message: `Заявка ${request.id} подтверждена. Сумма: ${request.amount} ⭐.` };
+}
+
+function rejectWithdraw(requestId) {
+    const request = findPendingWithdraw(requestId);
+    if (!request) {
+        return { ok: false, message: `Заявка ${requestId} не найдена или уже обработана.` };
+    }
+
+    request.status = 'rejected';
+    request.resolvedAt = new Date().toISOString();
+    addStars(request.playerId, request.amount);
+    saveStarsState();
+
+    return { ok: true, message: `Заявка ${request.id} отклонена. ${request.amount} ⭐ возвращены игроку ${request.playerId}.` };
 }
 
 function emitStarsBalance(playerId) {
