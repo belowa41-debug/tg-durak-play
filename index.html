@@ -117,7 +117,10 @@
             <h1>Дурак Онлайн</h1>
             <p>Нажми “Начать игру” для случайного соперника, пригласи друга или выбери режим Telegram Stars.</p>
             <div class="stars-balance-panel">
-                <div>Баланс: <strong><span id="stars-balance">0</span> ⭐</strong></div>
+                <div>
+                    Доступно: <strong><span id="stars-balance">0</span> ⭐</strong><br>
+                    <small>Ожидает вывода: <span id="stars-pending-withdraw">0</span> ⭐</small>
+                </div>
                 <div class="stars-balance-actions">
                     <button onclick="buyStars()">Пополнить</button>
                     <button class="stars-withdraw-btn" onclick="withdrawStars()">Вывести</button>
@@ -390,6 +393,7 @@
             starsBalance = data.balance || 0;
             starsPaymentsEnabled = Boolean(data.paymentsEnabled && data.registered);
             document.getElementById('stars-balance').innerText = starsBalance;
+            document.getElementById('stars-pending-withdraw').innerText = data.pendingWithdraw || 0;
         });
 
         socket.on('starsInvoice', (data) => {
